@@ -14,6 +14,8 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            console.log("hwllo");
+
             const gitExtension = vscode.extensions.getExtension("vscode.git")?.exports;
             if (!gitExtension) {
                 vscode.window.showErrorMessage("Cannot access Git extension");
