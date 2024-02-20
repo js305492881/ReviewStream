@@ -1,10 +1,14 @@
 {
-  "name": "xiesigitpush3",
+  "name": "xiesigitpush",
   "displayName": "xiesigitpush",
   "description": "alibaba git push",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "engines": {
     "vscode": "^1.86.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://gitlab.alibaba-inc.com/wh_stc_mw/vscode_extension_gitpushreview.git"
   },
   "categories": [
     "Other"

@@ -6,45 +6,55 @@ import * as vscode from "vscode";
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-    let disposable = vscode.commands.registerCommand("extension.gitPushForReview", async () => {
-        const gitExtension = vscode.extensions.getExtension("vscode.git");
-        const git = gitExtension?.exports;
+    context.subscriptions.push(
+        vscode.commands.registerCommand("extension.gitPushForReview", async (sourceControl: vscode.SourceControl) => {
+            // 确保sourceControl和sourceControl.rootUri不为undefined
+            if (!sourceControl || !sourceControl.rootUri) {
+                vscode.window.showErrorMessage("No repository found for the selected item");
+                return;
+            }
 
-        if (!git) {
-            vscode.window.showErrorMessage("Unable to load Git extension");
-            return;
-        }
+            const gitExtension = vscode.extensions.getExtension("vscode.git")?.exports;
+            if (!gitExtension) {
+                vscode.window.showErrorMessage("Cannot access Git extension");
+                return;
+            }
 
-        const gitAPI = git.getAPI(1);
-        const [repository] = gitAPI.repositories;
+            const gitAPI = gitExtension.getAPI(1);
+            const repository = gitAPI.repositories.find((repo: { rootUri: { toString: () => string } }) => repo.rootUri.toString() === sourceControl.rootUri?.toString());
 
-        if (!repository) {
-            vscode.window.showErrorMessage("No repository found");
-            return;
-        }
+            if (!repository) {
+                vscode.window.showErrorMessage("No repository found for the selected item");
+                return;
+            }
 
-        const currentBranch = repository.state.HEAD?.name;
-        vscode.window.showErrorMessage(`当前分支为:${currentBranch}`);
-        if (!currentBranch) {
-            vscode.window.showErrorMessage("No active branch found");
-            return;
-        }
+            const currentBranch = repository.state.HEAD?.name;
+            if (!currentBranch) {
+                vscode.window.showErrorMessage("No active branch found in the repository");
+                return;
+            }
 
-        const pushOptions = ["push", "origin", `HEAD:refs/for/${currentBranch}`];
-        repository.inputBox.value = pushOptions.join(" ");
-
-        try {
-            await vscode.commands.executeCommand("workbench.action.output.toggleOutput");
-
-            await repository.push("origin", `HEAD:refs/for/${currentBranch}`, true); // true 是为了设置 --force 参数
-            vscode.window.showInformationMessage(`Pushed to refs/for/${currentBranch}`);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Failed to push: ${error}`);
-        }
-    });
-
-    context.subscriptions.push(disposable);
+            try {
+                // Replace 'origin' and 'refs/for/master' with your own push destination and refspec
+                await repository.push("origin", `HEAD:refs/for/${currentBranch}`, true);
+                vscode.window.showInformationMessage(`Repository ${repository.rootUri.path} has been pushed for review.`);
+            } catch (e) {
+                vscode.window.showErrorMessage(`Failed to push the repository: ${e}`);
+            }
+        })
+    );
 }
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
+
+// 辅助函数：确保路径字符串是一致的
+// 辅助函数：确保路径字符串是一致的
+function normalizePath(path: string | undefined): string {
+    // 如果 path 未定义，返回空字符串
+    if (typeof path !== "string") {
+        console.warn("Path is undefined, returning an empty string.");
+        return "";
+    }
+    return path.replace(/\\/g, "/"); // 将所有反斜杠转换为正斜杠
+}
