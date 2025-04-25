@@ -6,6 +6,9 @@ import * as vscode from "vscode";
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+
+    vscode.window.showInformationMessage("hello vs code");
+
     context.subscriptions.push(
         vscode.commands.registerCommand("extension.gitPushForReview", async (sourceControl: vscode.SourceControl) => {
             // 确保sourceControl和sourceControl.rootUri不为undefined
