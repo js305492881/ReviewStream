@@ -44,7 +44,21 @@
 ```bash
 vsce package
 ```
+
+```bash
+npx vsce package
+```
+
 生成的 .vsix 文件可用于安装到本地 VS Code。
+
+### 打包发布常见问题
+
+如果执行 `npx vsce package` 报错类似 “@types/vscode 版本过高” 或 “engines.vscode 不兼容”，请确保 `package.json` 的 `engines.vscode` 字段与 `@types/vscode` 版本一致。例如：
+
+- 如果 `@types/vscode` 是 `^1.116.0`，则 `engines.vscode` 也应为 `^1.116.0`。
+- 推荐升级 `engines.vscode`，保持类型和运行环境一致。
+
+修改后重新执行 `npx vsce package` 即可。
 
 ### 使用说明
 1. 在 VS Code 的源代码管理（SCM）页面，每个 Git 仓库会出现 “Push for Review” 按钮。
