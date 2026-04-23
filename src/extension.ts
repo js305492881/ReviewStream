@@ -3,7 +3,10 @@
 
 import * as vscode from "vscode";
 import * as os from "os";
-import notifier from "node-notifier";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * 当扩展被激活时调用
@@ -11,7 +14,6 @@ import notifier from "node-notifier";
  * @param context VS Code 扩展上下文
  */
 export function activate(context: vscode.ExtensionContext) {
-
   // 注册“Push for Review”命令
   // Register the 'Push for Review' command
   context.subscriptions.push(
@@ -31,10 +33,6 @@ export function activate(context: vscode.ExtensionContext) {
           );
           return;
         }
-
-        // 日志输出，调试用
-        // Debug log
-        console.log("hwllo");
 
         // 获取 Git 扩展 API
         // Get the Git extension API
@@ -75,44 +73,157 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         try {
-          // 执行 push 操作，将当前分支推送到 refs/for/分支名
-          // Push the current branch to refs/for/{branch} for code review
-          await repository.push(
-            "origin",
-            `HEAD:refs/for/${currentBranch}`,
-            true,
+          // 通过命令行执行 git push，以拿到完整的远端返回日志
+          // Execute git push via CLI so we can capture remote output text
+          const pushOutput = await runGitPushAndGetOutput(
+            repository.rootUri.fsPath,
+            currentBranch,
           );
-          await showConfirmMessage(
-            `仓库 ${repository.rootUri.path} 已推送到评审分支 (Repository ${repository.rootUri.path} has been pushed for review).`,
-          );
+          console.log("[git push output]", pushOutput);
+
+          // 从 push 输出中提取 URL
+          // Extract review URL from push output
+          const url = extractFirstUrl(pushOutput);
+
+          // 兼容 repository.push 没有返回日志的情况
+          let msg = `仓库 ${repository.rootUri.path} 已推送到评审分支 (Repository ${repository.rootUri.path} has been pushed for review).`;
+          if (url) {
+            msg += `\n\n[访问评审链接](${url})`;
+          }
+          await showConfirmMessage(msg, url);
         } catch (e) {
-          await showConfirmMessage(
-            `推送失败 (Failed to push the repository): ${e}`,
-          );
+          // 调试输出异常内容
+          console.log("[git push error]", e);
+          // 从异常信息和命令输出中提取 URL
+          // Extract URL from error message and command output
+          const errorOutput = extractErrorOutput(e);
+          const url = extractFirstUrl(errorOutput);
+          let msg = `推送失败 (Failed to push the repository): ${e}`;
+          if (url) {
+            msg += `\n\n[访问评审链接](${url})`;
+          }
+          await showConfirmMessage(msg, url);
         }
         /**
          * 弹出带确认按钮的消息，并在 macOS 下调用系统通知
          * Show a confirmation dialog and send macOS notification if on macOS
          */
-        async function showConfirmMessage(message: string): Promise<void> {
-          // VS Code 弹窗，带“确定”按钮
-          await vscode.window.showInformationMessage(
-            message,
-            { modal: true },
-            "确定",
-          );
+        /**
+         * 弹出带确认按钮的消息，并在 macOS 下调用系统通知
+         * 支持“访问链接”按钮，点击后用默认浏览器打开 url
+         */
+        async function showConfirmMessage(
+          message: string,
+          url?: string,
+        ): Promise<void> {
+          if (url) {
+            vscode.env.openExternal(vscode.Uri.parse(url));
+          }
+
           // macOS 系统通知
           if (os.platform() === "darwin") {
-            notifier.notify({
-              title: "VS Code 扩展通知",
-              message,
-              sound: true,
-            });
+            await showMacSystemNotification("VS Code 扩展通知", message);
           }
+
+          // 动态按钮
+          const buttons = ["确定", "复制信息"];
+
+          const result = await vscode.window.showInformationMessage(
+            message,
+            { modal: true },
+            ...buttons,
+          );
+          if (result === "复制信息") {
+            await vscode.env.clipboard.writeText(message);
+            vscode.window.showInformationMessage("信息已复制到剪切板");
+          }
+
+          return;
         }
       },
     ),
   );
+}
+
+/**
+ * 通过 git 命令执行 push，并返回 stdout + stderr 的完整输出
+ * Run git push and return combined stdout and stderr output
+ */
+async function runGitPushAndGetOutput(
+  cwd: string,
+  branch: string,
+): Promise<string> {
+  const args = ["push", "-u", "origin", `HEAD:refs/for/${branch}`];
+  const { stdout, stderr } = await execFileAsync("git", args, { cwd });
+  return `${stdout ?? ""}\n${stderr ?? ""}`.trim();
+}
+
+/**
+ * 从文本中提取第一个 URL
+ * Extract first URL from a text block
+ */
+function extractFirstUrl(text: string): string | undefined {
+  // 先移除 ANSI 颜色控制符，避免把类似 "[0m" 的转义残留识别进 URL
+  // Remove ANSI escape sequences before URL extraction
+  const cleanedText = stripAnsiCodes(text);
+  // 排除常见边界字符（如 |、)、]、引号等）
+  // Exclude common URL boundary characters such as '|', ')', ']' and quotes
+  const match = cleanedText.match(/https?:\/\/[^\s|)\]"'<>]+/);
+  if (!match) {
+    return undefined;
+  }
+  // 防御性裁剪：避免极端情况下尾部仍带标点
+  // Defensive trim for trailing punctuations
+  return match[0].replace(/[.,;:!?]+$/, "");
+}
+
+/**
+ * 移除文本中的 ANSI 转义序列（颜色/样式控制码）
+ * Strip ANSI escape sequences from text
+ */
+function stripAnsiCodes(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+/**
+ * 从异常对象中提取可用于解析的输出文本
+ * Extract parsable output text from unknown error object
+ */
+function extractErrorOutput(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error && typeof error === "object") {
+    const maybeError = error as {
+      message?: string;
+      stdout?: string;
+      stderr?: string;
+    };
+    return `${maybeError.message ?? ""}\n${maybeError.stdout ?? ""}\n${maybeError.stderr ?? ""}`.trim();
+  }
+  return "";
+}
+
+/**
+ * 在 macOS 上使用 osascript 发送系统通知
+ * Send native macOS notification via osascript
+ */
+async function showMacSystemNotification(
+  title: string,
+  message: string,
+): Promise<void> {
+  const safeTitle = title.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const safeMessage = message
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, " ");
+
+  const script = `display notification "${safeMessage}" with title "${safeTitle}" sound name "default"`;
+  try {
+    await execFileAsync("osascript", ["-e", script]);
+  } catch (error) {
+    console.log("[mac notification error]", error);
+  }
 }
 
 /**

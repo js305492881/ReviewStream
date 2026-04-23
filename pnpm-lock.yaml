@@ -13,40 +13,40 @@ importers:
         version: 10.0.1
     devDependencies:
       '@types/mocha':
-        specifier: ^10.0.6
+        specifier: ^10.0.10
         version: 10.0.10
       '@types/node':
-        specifier: 18.x
+        specifier: ~18.19.130
         version: 18.19.130
       '@types/node-notifier':
         specifier: ^8.0.5
         version: 8.0.5
       '@types/vscode':
-        specifier: ^1.86.0
+        specifier: ^1.116.0
         version: 1.116.0
       '@typescript-eslint/eslint-plugin':
-        specifier: ^6.19.1
+        specifier: ^6.21.0
         version: 6.21.0(@typescript-eslint/parser@6.21.0(eslint@8.57.1)(typescript@5.9.3))(eslint@8.57.1)(typescript@5.9.3)
       '@typescript-eslint/parser':
-        specifier: ^6.19.1
+        specifier: ^6.21.0
         version: 6.21.0(eslint@8.57.1)(typescript@5.9.3)
       '@vscode/test-cli':
         specifier: ^0.0.4
         version: 0.0.4
       '@vscode/test-electron':
-        specifier: ^2.3.9
+        specifier: ^2.5.2
         version: 2.5.2
       eslint:
-        specifier: ^8.56.0
+        specifier: ^8.57.1
         version: 8.57.1
       ts-loader:
-        specifier: ^9.5.1
+        specifier: ^9.5.7
         version: 9.5.7(typescript@5.9.3)(webpack@5.106.2)
       typescript:
-        specifier: ^5.3.3
+        specifier: ^5.9.3
         version: 5.9.3
       webpack:
-        specifier: ^5.91.0
+        specifier: ^5.106.2
         version: 5.106.2(webpack-cli@5.1.4)
       webpack-cli:
         specifier: ^5.1.4

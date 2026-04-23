@@ -30,6 +30,11 @@
 	pnpm add -g vsce
 	```
 
+4. (可选)升级本地库
+	```bash
+	pnpm update
+	```
+
 ## 运行方法
 
 ### 开发调试
@@ -50,6 +55,9 @@ vsce package
 
 - 在每个 Git 仓库的 SCM 页面添加 “Push for Review” 按钮。
 - 自动检测当前分支并 push 到 `refs/for/分支名`。
+- 通过命令行 `git push` 捕获远端返回文本（含 remote 提示信息）。
+- 自动从 push 返回文本中识别评审 URL（会先清理 ANSI 颜色控制码，避免识别到 `[0m` 等非 URL 内容），并在弹窗中提供“访问链接”按钮快速跳转。
+- 在 macOS 下通过系统原生通知（osascript）推送结果提示；如未显示，请在系统设置中开启 VS Code 通知权限。
 - 操作成功/失败会有消息提示。
 
 ## 主要代码说明

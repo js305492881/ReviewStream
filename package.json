@@ -1,8 +1,8 @@
 {
-  "name": "xiesigitpush",
-  "displayName": "xiesigitpush",
-  "description": "alibaba git push",
-  "version": "1.0.1",
+  "name": "git-push-review",
+  "displayName": "git push review",
+  "description": "在 VS Code 的源代码管理（SCM）界面为每个 Git 仓库添加一个 “Push for Review” 按钮，点击后自动 push 当前分支到远端 refs/for/分支名，适用于 Gerrit 代码评审场景，支持自动识别评审 URL、弹窗与 macOS 系统通知提示。",
+  "version": "1.1.0",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -48,18 +48,18 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/mocha": "^10.0.6",
-    "@types/node": "18.x",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "~18.19.130",
     "@types/node-notifier": "^8.0.5",
-    "@types/vscode": "^1.86.0",
-    "@typescript-eslint/eslint-plugin": "^6.19.1",
-    "@typescript-eslint/parser": "^6.19.1",
+    "@types/vscode": "^1.116.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
     "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.9",
-    "eslint": "^8.56.0",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.3",
-    "webpack": "^5.91.0",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^8.57.1",
+    "ts-loader": "^9.5.7",
+    "typescript": "^5.9.3",
+    "webpack": "^5.106.2",
     "webpack-cli": "^5.1.4"
   },
   "dependencies": {
