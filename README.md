@@ -46,7 +46,7 @@ vsce package
 ```
 
 ```bash
-npx vsce package
+pnpm run package:vsix
 ```
 
 生成的 .vsix 文件可用于安装到本地 VS Code。
@@ -59,6 +59,28 @@ npx vsce package
 - 推荐升级 `engines.vscode`，保持类型和运行环境一致。
 
 修改后重新执行 `npx vsce package` 即可。
+
+如果执行 `npx vsce package` 报错包含以下内容：
+
+- `ERROR Command failed: npm list --production ...`
+- `npm error code ELSPROBLEMS`
+- 大量 `npm error missing ...` / `npm error invalid ...`
+
+这通常是 `vsce` 调用 `npm list --production` 与 `pnpm` 的依赖布局差异导致，并非你的扩展业务代码本身有问题。
+
+可直接使用以下方式打包（已在 `package.json` 增加脚本）：
+
+```bash
+pnpm run package:vsix
+```
+
+等价命令：
+
+```bash
+npx vsce package --no-dependencies
+```
+
+说明：`--no-dependencies` 会跳过依赖树校验，适合本项目这种由 webpack 打包产物驱动的 VS Code 扩展发布流程。
 
 ### 使用说明
 1. 在 VS Code 的源代码管理（SCM）页面，每个 Git 仓库会出现 “Push for Review” 按钮。
