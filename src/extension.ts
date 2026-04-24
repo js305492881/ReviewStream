@@ -16,6 +16,8 @@ const execFileAsync = promisify(execFile);
 export function activate(context: vscode.ExtensionContext) {
   // 注册“Push for Review”命令
   // Register the 'Push for Review' command
+  // 防抖变量，3秒内禁用按钮
+  let isPushing = false;
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "extension.gitPushForReview",
@@ -25,6 +27,16 @@ export function activate(context: vscode.ExtensionContext) {
        * @param sourceControl 当前操作的源代码管理对象
        */
       async (sourceControl: vscode.SourceControl) => {
+        if (isPushing) {
+          vscode.window.showWarningMessage(
+            "操作过于频繁，请稍后再试（请等待3秒）",
+          );
+          return;
+        }
+        isPushing = true;
+        setTimeout(() => {
+          isPushing = false;
+        }, 3000);
         // 检查 sourceControl 和 rootUri 是否存在
         // Ensure sourceControl and its rootUri are defined
         if (!sourceControl || !sourceControl.rootUri) {
@@ -125,8 +137,11 @@ export function activate(context: vscode.ExtensionContext) {
             await showMacSystemNotification("VS Code 扩展通知", message);
           }
 
-          // 动态按钮
-          const buttons = ["确定", "复制信息"];
+          // 动态按钮，是否显示“打开prebuild页面”
+          let buttons = ["复制信息", "复制url"];
+          if (url && url.includes("gerrit3.alibaba-inc.com")) {
+            buttons.push("打开prebuild页面");
+          }
 
           const result = await vscode.window.showInformationMessage(
             message,
@@ -136,6 +151,15 @@ export function activate(context: vscode.ExtensionContext) {
           if (result === "复制信息") {
             await vscode.env.clipboard.writeText(message);
             vscode.window.showInformationMessage("信息已复制到剪切板");
+          } else if (result === "复制url" && url) {
+            await vscode.env.clipboard.writeText(url);
+            vscode.window.showInformationMessage("URL 已复制到剪切板");
+          } else if (result === "打开prebuild页面") {
+            vscode.env.openExternal(
+              vscode.Uri.parse(
+                "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add",
+              ),
+            );
           }
 
           return;
