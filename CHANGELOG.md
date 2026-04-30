@@ -1,9 +1,8 @@
-# Change Log
+# 1.1.4
 
-All notable changes to the "git" extension will be documented in this file.
+- 补充打开review页面的功能.
+- 补充打开prebuild页面的功能.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+# 1.0.0
 
-## [Unreleased]
-
-- Initial release
+- 实现本地自动化推送,并完成
