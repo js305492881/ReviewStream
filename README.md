@@ -14,14 +14,48 @@
 	```
 
 2. 安装依赖：
-	- 使用 npm：
-	  ```bash
-	  npm install
-	  ```
-	- 或使用 pnpm（推荐更快更节省空间）：
-	  ```bash
-	  pnpm install
-	  ```
+ 2. 安装依赖（推荐使用 pnpm）：
+
+ - 检查并准备 Node 环境（推荐 Node 18+）：
+
+	 - 推荐使用 `nvm`/`nvm-windows` 管理 Node 版本，例如：
+
+		 ```bash
+		 nvm install 18.19.0
+		 nvm use 18.19.0
+		 ```
+
+ - 安装 pnpm（可选，两种方式）：
+
+	 ```bash
+	 npm install -g pnpm@latest
+	 # 或使用 corepack (Node 16.9+ 自带 corepack)
+	 corepack enable && corepack prepare pnpm@latest --activate
+	 ```
+
+ - 在项目根运行：
+
+	 ```bash
+	 pnpm install
+	 ```
+
+ - 如果遇到本地编译失败（常见于带原生模块的依赖，如 `keytar`）：
+
+	 - 原因：Windows 上某些包会触发 `node-gyp` 本地构建，需安装 Visual Studio 的 "Desktop development with C++" 工作负载。
+	 - 解决办法（按需选择）：
+		 - 推荐：安装 Visual Studio 或 Build Tools（包含 C++ 编译工具），然后重新运行 `pnpm install`。
+		 - 快速替代（若无法立刻安装编译工具）：
+			 1. 打开项目根的 [pnpm-workspace.yaml](pnpm-workspace.yaml#L1)，将 `onlyBuiltDependencies` 中的 `keytar` 移除或改为空：
+
+					```yaml
+					onlyBuiltDependencies: []
+					```
+
+			 2. 重新运行 `pnpm install`。在我的环境中，移除该配置后安装成功，pnpm 会输出 "Ignored build scripts: keytar@..."，并继续安装其余依赖。
+
+			 3. 如需允许某些依赖运行构建脚本，可运行 `pnpm approve-builds` 并根据提示批准。
+
+	 - 说明：长期推荐安装官方的 Visual Studio C++ 工具链以避免后续原生扩展构建问题。
 
 3. （可选）全局安装 vsce 工具用于打包：
 	```bash
