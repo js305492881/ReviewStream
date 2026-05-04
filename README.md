@@ -33,7 +33,8 @@
 - 识别当前仓库上游分支，优先执行 `git fetch <remote> <branch>`。
 - 执行 `git reset --hard`（有上游时重置到远端分支，无上游时重置到本地 HEAD）。
 - 执行 `git clean -fdx` 清除未追踪文件。
-- 在 Windows 出现长路径删除失败时，会自动尝试 `git config core.longpaths true` 后重试；如仍失败，会兜底删除 `node_modules` 后再次清理。
+- 在 Windows 出现长路径删除失败时，会自动尝试 `git config core.longpaths true` 后重试；如仍失败，会继续对 Unity 常见生成目录（如 `Library`、`Logs`、`Temp`、`obj`、`bin`、`UserSettings`）执行文件系统兜底删除，再次清理。
+- 若最终只剩 Unity 缓存/锁文件因系统占用而无法删除，扩展会将其记录为警告并继续后续 Git 对象回收；详细残留路径可在输出面板查看。
 - 执行本地对象回收：`reflog expire`、`repack -Ad`、`prune --expire=now`、`gc --prune=now`。
 - 记录清理后仓库体积并弹窗展示体积变化。
 

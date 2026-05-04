@@ -10,6 +10,37 @@ import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
+const UNITY_GENERATED_CLEANUP_PATH_PATTERNS = [
+  /^Library(?:\/|$)/i,
+  /^Logs(?:\/|$)/i,
+  /^Temp(?:\/|$)/i,
+  /^obj(?:\/|$)/i,
+  /^bin(?:\/|$)/i,
+  /^UserSettings(?:\/|$)/i,
+  /^MemoryCaptures(?:\/|$)/i,
+  /^Recordings(?:\/|$)/i,
+  /^Build(?:\/|$)/i,
+  /^Builds(?:\/|$)/i,
+  /^Library\//i,
+  /^Logs\//i,
+  /^Temp\//i,
+  /^\.vs\/(?:|.*)$/i,
+  /^\.gradle(?:\/|$)/i,
+];
+
+const UNITY_GENERATED_CLEANUP_ROOTS = [
+  "Library",
+  "Logs",
+  "Temp",
+  "obj",
+  "bin",
+  "UserSettings",
+  "MemoryCaptures",
+  "Recordings",
+  ".vs",
+  ".gradle",
+];
+
 /**
  * 当扩展被激活时调用
  * This method is called when your extension is activated
@@ -480,6 +511,41 @@ async function runGitCleanWithFallback(
     return firstClean;
   }
 
+  const firstFailurePaths = parseGitCleanFailurePaths(firstClean);
+  if (
+    process.platform === "win32" &&
+    firstFailurePaths.length > 0 &&
+    areAllPathsUnityGenerated(firstFailurePaths)
+  ) {
+    output.appendLine(
+      "[gitClear] 检测到 Unity 生成目录删除失败，尝试使用文件系统兜底清理。",
+    );
+    await forceRemoveUnityGeneratedArtifacts(repoPath, output, firstFailurePaths);
+
+    const cleanAfterUnityFallback = await runGitCmd(repoPath, ["clean", "-fdx"]);
+    logGitResult(
+      output,
+      "clean -fdx (retry after unity artifact cleanup)",
+      cleanAfterUnityFallback,
+    );
+    if (cleanAfterUnityFallback.ok) {
+      return cleanAfterUnityFallback;
+    }
+
+    const remainingUnityFailurePaths = parseGitCleanFailurePaths(cleanAfterUnityFallback);
+    if (
+      remainingUnityFailurePaths.length > 0 &&
+      areAllPathsUnityGenerated(remainingUnityFailurePaths)
+    ) {
+      output.appendLine(
+        "[gitClear] 仍有 Unity 缓存/锁文件无法删除，已记录警告并继续后续 Git 对象回收。",
+      );
+      return asWarningOnlySuccess(cleanAfterUnityFallback);
+    }
+
+    return cleanAfterUnityFallback;
+  }
+
   if (!isWindowsLongPathCleanError(firstClean)) {
     return firstClean;
   }
@@ -504,6 +570,41 @@ async function runGitCleanWithFallback(
     return secondClean;
   }
 
+  const secondFailurePaths = parseGitCleanFailurePaths(secondClean);
+  if (
+    process.platform === "win32" &&
+    secondFailurePaths.length > 0 &&
+    areAllPathsUnityGenerated(secondFailurePaths)
+  ) {
+    output.appendLine(
+      "[gitClear] 长路径重试后仍有 Unity 生成目录残留，尝试文件系统兜底删除。",
+    );
+    await forceRemoveUnityGeneratedArtifacts(repoPath, output, secondFailurePaths);
+
+    const cleanAfterUnityFallback = await runGitCmd(repoPath, ["clean", "-fdx"]);
+    logGitResult(
+      output,
+      "clean -fdx (retry after unity artifact cleanup)",
+      cleanAfterUnityFallback,
+    );
+    if (cleanAfterUnityFallback.ok) {
+      return cleanAfterUnityFallback;
+    }
+
+    const remainingUnityFailurePaths = parseGitCleanFailurePaths(cleanAfterUnityFallback);
+    if (
+      remainingUnityFailurePaths.length > 0 &&
+      areAllPathsUnityGenerated(remainingUnityFailurePaths)
+    ) {
+      output.appendLine(
+        "[gitClear] Unity 缓存目录仍有被占用文件，当前清理以警告形式继续。",
+      );
+      return asWarningOnlySuccess(cleanAfterUnityFallback);
+    }
+
+    return cleanAfterUnityFallback;
+  }
+
   output.appendLine(
     "[gitClear] 二次 clean 仍失败，尝试直接删除 node_modules 后再次 clean。",
   );
@@ -511,7 +612,121 @@ async function runGitCleanWithFallback(
 
   const thirdClean = await runGitCmd(repoPath, ["clean", "-fdx"]);
   logGitResult(output, "clean -fdx (retry after rm node_modules)", thirdClean);
+  const thirdFailurePaths = parseGitCleanFailurePaths(thirdClean);
+  if (
+    process.platform === "win32" &&
+    thirdFailurePaths.length > 0 &&
+    areAllPathsUnityGenerated(thirdFailurePaths)
+  ) {
+    output.appendLine(
+      "[gitClear] node_modules 兜底后仅剩 Unity 临时文件删除失败，按警告继续。",
+    );
+    return asWarningOnlySuccess(thirdClean);
+  }
   return thirdClean;
+}
+
+/**
+ * 解析 git clean stderr 中删除失败的相对路径。
+ */
+function parseGitCleanFailurePaths(result: GitExecutionResult): string[] {
+  const text = `${result.stderr}\n${result.stdout}`;
+  const matches = text.matchAll(/warning: failed to remove\s+(.+?):\s+/gi);
+  const paths = new Set<string>();
+
+  for (const match of matches) {
+    const rawPath = match[1]?.trim();
+    if (!rawPath) {
+      continue;
+    }
+
+    const normalizedPath = normalizePath(rawPath).replace(/^\.\//, "");
+    if (normalizedPath) {
+      paths.add(normalizedPath);
+    }
+  }
+
+  return [...paths];
+}
+
+/**
+ * 判断失败路径是否全部属于 Unity 常见的可再生目录。
+ */
+function areAllPathsUnityGenerated(paths: string[]): boolean {
+  return paths.length > 0 && paths.every(isUnityGeneratedCleanupPath);
+}
+
+/**
+ * 判断单个路径是否属于 Unity 构建/缓存产物。
+ */
+function isUnityGeneratedCleanupPath(relativePath: string): boolean {
+  const normalizedPath = normalizePath(relativePath).replace(/^\.\//, "");
+  return UNITY_GENERATED_CLEANUP_PATH_PATTERNS.some((pattern) =>
+    pattern.test(normalizedPath),
+  );
+}
+
+/**
+ * 对 Unity 生成目录执行文件系统级兜底删除，减少 git clean 在 Windows 上的误判失败。
+ */
+async function forceRemoveUnityGeneratedArtifacts(
+  repoPath: string,
+  output: vscode.OutputChannel,
+  failurePaths: string[],
+): Promise<void> {
+  const candidateRoots = new Set<string>();
+
+  for (const failurePath of failurePaths) {
+    const normalizedPath = normalizePath(failurePath).replace(/^\.\//, "");
+    const matchedRoot = UNITY_GENERATED_CLEANUP_ROOTS.find(
+      (root) =>
+        normalizedPath.localeCompare(root, undefined, { sensitivity: "accent" }) === 0 ||
+        normalizedPath.startsWith(`${root}/`),
+    );
+
+    if (matchedRoot) {
+      candidateRoots.add(matchedRoot);
+    }
+  }
+
+  for (const root of candidateRoots) {
+    await forceRemovePath(path.join(repoPath, root), output, `Unity 生成目录 ${root}`);
+  }
+}
+
+/**
+ * 使用 Windows 长路径前缀执行强制删除。
+ */
+async function forceRemovePath(
+  targetPath: string,
+  output: vscode.OutputChannel,
+  label: string,
+): Promise<void> {
+  if (!(await pathExists(targetPath))) {
+    return;
+  }
+
+  try {
+    await fs.rm(toWindowsLongPath(targetPath), {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+    output.appendLine(`[gitClear] 已兜底删除 ${label}: ${targetPath}`);
+  } catch (error) {
+    output.appendLine(`[gitClear] 删除 ${label} 失败：${String(error)}`);
+  }
+}
+
+/**
+ * 对仅包含告警的 clean 结果降级为成功，便于后续继续执行 Git 对象回收。
+ */
+function asWarningOnlySuccess(result: GitExecutionResult): GitExecutionResult {
+  return {
+    ...result,
+    ok: true,
+  };
 }
 
 /**
@@ -856,3 +1071,13 @@ function normalizePath(path: string | undefined): string {
   // Replace all backslashes with forward slashes
   return path.replace(/\\/g, "/");
 }
+
+/**
+ * 提供给测试使用的内部辅助函数集合，避免 git clean 回退策略出现回归。
+ * @returns 可供测试调用的纯函数引用
+ */
+export const __test__ = {
+  parseGitCleanFailurePaths,
+  areAllPathsUnityGenerated,
+  isUnityGeneratedCleanupPath,
+};
