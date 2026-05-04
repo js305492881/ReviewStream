@@ -146,7 +146,9 @@ export function activate(context: vscode.ExtensionContext) {
           // 根据配置的正则映射自动打开对应链接（如果匹配且允许自动打开）
           if (mappings && mappings.length > 0) {
             for (const mapping of mappings) {
-              if (!mapping || !mapping.pattern || !mapping.url) continue;
+              if (!mapping || !mapping.pattern || !mapping.url) {
+                continue;
+              }
               try {
                 const re = new RegExp(mapping.pattern);
                 if ((url && re.test(url)) || (message && re.test(message))) {
