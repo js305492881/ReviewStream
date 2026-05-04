@@ -49,11 +49,40 @@ cd vscode_extension_gitpushreview
 
 ```bash
 pnpm run package:vsix
-# 或
+# 或（等价）
 npx vsce package --no-dependencies
 ```
 
 说明：对于使用 `pnpm` 管理依赖的仓库，`vsce` 在运行 `npm list --production` 时可能出现依赖布局差异导致的问题。`--no-dependencies` 可以跳过依赖校验，适用于已通过 webpack 打包产物发布的扩展。
+
+注意（Windows 用户）：
+
+- 早期脚本中使用了 Unix 风格的 `mkdir -p` 与 `mv` 命令，可能在 Windows 的 `cmd.exe` 中导致失败（示例错误："处理: -p 时出错"）。
+- 已在仓库中添加跨平台小脚本 `scripts/move-vsix.js`，并将 `package:vsix` 脚本更新为：
+
+```json
+"package:vsix": "vsce package --no-dependencies && node ./scripts/move-vsix.js"
+```
+
+ 现在直接运行 `pnpm run package:vsix` 将在打包完成后把生成的 `.vsix` 文件移动到 `dist/` 目录（兼容 Windows 和 Unix）。
+
+如果你更倾向手动操作，可以按平台分别使用：
+
+- macOS / Linux:
+
+```bash
+npx vsce package --no-dependencies
+mkdir -p dist && mv *.vsix dist/
+```
+
+- Windows (Powershell):
+
+```powershell
+npx vsce package --no-dependencies
+if(!(Test-Path dist)){ New-Item -ItemType Directory -Path dist }
+Get-ChildItem -Filter *.vsix | Move-Item -Destination dist
+```
+
 
 ## 测试
 
