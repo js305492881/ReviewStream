@@ -4,7 +4,7 @@
   "publisher": "xiesigitpush3",
   "author": "谢斯",
   "description": "在 VS Code 的源代码管理（SCM）界面为每个 Git 仓库添加一个 “Push for Review” 按钮，点击后自动 push 当前分支到远端 refs/for/分支名，适用于 Gerrit 代码评审场景，支持自动识别评审 URL、弹窗与 macOS 系统通知提示。",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -13,8 +13,8 @@
     "url": "https://github.com/js305492881/ReviewStream.git"
   },
   "bugs": {
-		"url": "https://github.com/js305492881/ReviewStream/issues"
-	},
+    "url": "https://github.com/js305492881/ReviewStream/issues"
+  },
   "categories": [
     "Other"
   ],
@@ -37,10 +37,17 @@
           "items": {
             "type": "object",
             "properties": {
-              "pattern": { "type": "string" },
-              "url": { "type": "string" }
+              "pattern": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
             },
-            "required": ["pattern", "url"],
+            "required": [
+              "pattern",
+              "url"
+            ],
             "additionalProperties": false
           },
           "default": [
