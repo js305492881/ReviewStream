@@ -5,6 +5,7 @@
 ## 主要功能（面向用户）
 
 - 在每个 Git 仓库的 SCM 页面添加“Push for Review”按钮。
+- 在每个 Git 仓库的 SCM 页面添加“Clear”按钮，用于回收 Git 空间并清理工作区。
 - 自动检测当前分支并将其推送到 `refs/for/<branch>`。
 - 捕获远端返回信息并尝试识别评审链接；可配置是否在推送后自动打开链接。
 - 在 macOS 上支持系统通知（需要允许 VS Code 的通知权限）。
@@ -14,6 +15,29 @@
 1. 打开需要操作的仓库并切换到源代码管理（SCM）视图。
 2. 在对应仓库的标题栏点击“Push for Review”按钮。
 3. 推送完成后会弹出结果对话框（成功 / 失败），如果检测到评审链接并且在设置中启用了自动跳转，则会在默认浏览器中打开链接。
+
+如需执行仓库清理：
+
+1. 在 SCM 中选择目标仓库（支持多仓库场景，也支持子模块仓库）。
+2. 点击“Clear”按钮并在确认弹窗中选择“继续清理”。
+3. 清理过程会显示进度条（fetch/reset/clean/gc）。
+4. 完成后弹窗会展示清理前后体积对比（`git` 目录、`objects` 目录、工作区）。
+
+> 安全提示：`Clear` 会执行 `git reset --hard` 和 `git clean -fdx`，会删除未提交改动和未追踪文件，请先确认重要内容已提交或备份。
+
+## Clear 清理流程
+
+`Clear` 按钮主要参考 `CompactWebGLHistory.py --clear` 的清理思路，并做了 VS Code 交互增强。
+
+- 记录清理前仓库体积（`git` 目录、`objects` 目录、工作区）。
+- 识别当前仓库上游分支，优先执行 `git fetch <remote> <branch>`。
+- 执行 `git reset --hard`（有上游时重置到远端分支，无上游时重置到本地 HEAD）。
+- 执行 `git clean -fdx` 清除未追踪文件。
+- 在 Windows 出现长路径删除失败时，会自动尝试 `git config core.longpaths true` 后重试；如仍失败，会兜底删除 `node_modules` 后再次清理。
+- 执行本地对象回收：`reflog expire`、`repack -Ad`、`prune --expire=now`、`gc --prune=now`。
+- 记录清理后仓库体积并弹窗展示体积变化。
+
+清理的详细命令输出会写入 VS Code 输出面板 `ReviewStream`，用于排查问题。
 
 ### 设置示例（用户可在 VS Code 的设置中修改）
 

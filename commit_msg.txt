@@ -1,0 +1,10 @@
+chore(release): v1.3.0
+
+Release notes:
+- Add `Clear` SCM action: repository cleanup workflow (fetch/reset/clean/gc) with progress UI and detailed OutputChannel logs.
+- Add Windows long-path fallback for `git clean` (enable `core.longpaths`, fallback remove `node_modules`).
+- Update documentation: `README.md` and `.github/copilot-instructions.md`.
+- Adjust SCM menu order: `Push for Review` -> navigation@2, `Clear` -> navigation@3.
+- Bump package.json version to 1.3.0.
+
+References: commits since v1.2.0 and current workspace changes.

@@ -52,6 +52,11 @@ async function runGitPushAndGetOutput(cwd: string, branch: string): Promise<stri
   - 在 `src/extension.ts` 中实现行为后，同步在 `package.json` 的 `contributes.configuration` 中添加设置项（示例见下）。
   - 在 `README.md` 的“设置示例”中加入该设置说明与默认值，并列出可能的风险（例如自动打开外部链接）。
 
+- 若添加或修改 `extension.gitClear`（仓库清理）相关行为，请务必：
+	- 在 `README.md` 中同步说明清理步骤、风险提示（`reset --hard` / `clean -fdx`）和结果展示方式（清理前后体积对比）。
+	- 若新增配置项，必须同步更新 `package.json` 的 `contributes.configuration` 以及 `README.md` 设置示例。
+	- 保持长任务可观测性：应包含进度反馈（例如 `withProgress`）与日志输出位置说明（例如 OutputChannel）。
+
 示例（用户 settings.json）：
 
 ```json
