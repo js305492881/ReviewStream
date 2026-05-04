@@ -22,6 +22,36 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "ReviewStream",
+      "properties": {
+        "reviewStream.autoOpenLink": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否在推送后自动打开返回的评审链接。为 true 时自动跳转，false 时不跳转。"
+        },
+        "reviewStream.urlMappings": {
+          "type": "array",
+          "description": "可选的正则->URL 映射列表：当匹配到正则时会自动打开对应链接。每项对象包含 pattern（正则字符串）和 url（要打开的链接）。",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pattern": { "type": "string" },
+              "url": { "type": "string" }
+            },
+            "required": ["pattern", "url"],
+            "additionalProperties": false
+          },
+          "default": [
+            {
+              "pattern": "gerrit3\\.alibaba-inc\\.com",
+              "url": "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add"
+            }
+          ]
+        }
+      }
+    },
     "commands": [
       {
         "command": "extension.gitPushForReview",

@@ -128,8 +128,43 @@ export function activate(context: vscode.ExtensionContext) {
           message: string,
           url?: string,
         ): Promise<void> {
-          if (url) {
-            vscode.env.openExternal(vscode.Uri.parse(url));
+          const config = vscode.workspace.getConfiguration("reviewStream");
+          const autoOpen = config.get<boolean>("autoOpenLink", true);
+          const mappings = config.get<Array<{ pattern: string; url: string }>>(
+            "urlMappings",
+            [],
+          );
+
+          if (url && autoOpen) {
+            try {
+              await vscode.env.openExternal(vscode.Uri.parse(url));
+            } catch (err) {
+              console.log("[open review url error]", err);
+            }
+          }
+
+          // 根据配置的正则映射自动打开对应链接（如果匹配且允许自动打开）
+          if (mappings && mappings.length > 0) {
+            for (const mapping of mappings) {
+              if (!mapping || !mapping.pattern || !mapping.url) continue;
+              try {
+                const re = new RegExp(mapping.pattern);
+                if ((url && re.test(url)) || (message && re.test(message))) {
+                  if (autoOpen) {
+                    try {
+                      await vscode.env.openExternal(
+                        vscode.Uri.parse(mapping.url),
+                      );
+                    } catch (err) {
+                      console.log("[open mapping url error]", err);
+                    }
+                  }
+                  break;
+                }
+              } catch (err) {
+                console.log("[invalid mapping regex]", mapping.pattern, err);
+              }
+            }
           }
 
           // macOS 系统通知
@@ -137,11 +172,8 @@ export function activate(context: vscode.ExtensionContext) {
             await showMacSystemNotification("VS Code 扩展通知", message);
           }
 
-          // 动态按钮，是否显示“打开prebuild页面”
+          // 动态按钮，只保留复制相关按钮
           let buttons = ["复制信息", "复制url"];
-          if (url && url.includes("gerrit3.alibaba-inc.com")) {
-            buttons.push("打开prebuild页面");
-          }
 
           const result = await vscode.window.showInformationMessage(
             message,
@@ -154,12 +186,6 @@ export function activate(context: vscode.ExtensionContext) {
           } else if (result === "复制url" && url) {
             await vscode.env.clipboard.writeText(url);
             vscode.window.showInformationMessage("URL 已复制到剪切板");
-          } else if (result === "打开prebuild页面") {
-            vscode.env.openExternal(
-              vscode.Uri.parse(
-                "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add",
-              ),
-            );
           }
 
           return;
