@@ -4,7 +4,7 @@
   "publisher": "xiesigitpush3",
   "author": "谢斯",
   "description": "在 VS Code 的源代码管理（SCM）界面为每个 Git 仓库添加一个 “Push for Review” 按钮，点击后自动 push 当前分支到远端 refs/for/分支名，适用于 Gerrit 代码评审场景，支持自动识别评审 URL、弹窗与 macOS 系统通知提示。",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -55,6 +55,34 @@
               "pattern": "gerrit3\\.alibaba-inc\\.com",
               "url": "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add"
             }
+          ]
+        },
+        "reviewStream.clearFallbackRoots": {
+          "type": "array",
+          "description": "Clear 流程在 git clean 删除失败时可执行文件系统兜底删除的目录根（相对仓库根目录，默认包含 node_modules、dist、target、Library、Temp 等常见可再生目录）。",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "node_modules",
+            "Library",
+            "Logs",
+            "Temp",
+            "obj",
+            "bin",
+            "Build",
+            "Builds",
+            "dist",
+            "out",
+            "target",
+            ".gradle",
+            ".vs",
+            ".next",
+            ".nuxt",
+            ".angular",
+            "DerivedData",
+            "Pods",
+            ".cache"
           ]
         }
       }

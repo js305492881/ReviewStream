@@ -7,6 +7,7 @@
 - 在每个 Git 仓库的 SCM 页面添加“Push for Review”按钮。
 - 在每个 Git 仓库的 SCM 页面添加“Clear”按钮，用于回收 Git 空间并清理工作区。
 - 自动检测当前分支并将其推送到 `refs/for/<branch>`。
+- 推送远端策略：仅有一个远端时自动推送；存在多个远端时弹出列表供用户选择后再推送。
 - 捕获远端返回信息并尝试识别评审链接；可配置是否在推送后自动打开链接。
 - 在 macOS 上支持系统通知（需要允许 VS Code 的通知权限）。
 
@@ -33,8 +34,9 @@
 - 识别当前仓库上游分支，优先执行 `git fetch <remote> <branch>`。
 - 执行 `git reset --hard`（有上游时重置到远端分支，无上游时重置到本地 HEAD）。
 - 执行 `git clean -fdx` 清除未追踪文件。
-- 在 Windows 出现长路径删除失败时，会自动尝试 `git config core.longpaths true` 后重试；如仍失败，会继续对 Unity 常见生成目录（如 `Library`、`Logs`、`Temp`、`obj`、`bin`、`UserSettings`）执行文件系统兜底删除，再次清理。
-- 若最终只剩 Unity 缓存/锁文件因系统占用而无法删除，扩展会将其记录为警告并继续后续 Git 对象回收；详细残留路径可在输出面板查看。
+- 在 `git clean -fdx` 删除失败时，扩展会根据 `reviewStream.clearFallbackRoots` 对“可再生目录”执行文件系统兜底删除并重试（默认覆盖多技术栈常见目录，如 `node_modules`、`dist`、`target`、`Library`、`Temp` 等）。
+- 在 Windows 出现长路径删除失败时，会自动尝试 `git config core.longpaths true` 后重试。
+- 若最终仅剩配置的可再生目录中的缓存/锁文件因系统占用无法删除，扩展会记录警告并继续后续 Git 对象回收；详细残留路径可在输出面板查看。
 - 执行本地对象回收：`reflog expire`、`repack -Ad`、`prune --expire=now`、`gc --prune=now`。
 - 记录清理后仓库体积并弹窗展示体积变化。
 
@@ -51,11 +53,19 @@
 		"pattern": "gerrit3\\.alibaba-inc\\.com",
 		"url": "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add"
 	}
+],
+"reviewStream.clearFallbackRoots": [
+	"node_modules",
+	"dist",
+	"target",
+	"Library",
+	"Temp"
 ]
 ```
 
 - `reviewStream.autoOpenLink`（布尔，默认 `true`）：是否在推送后自动打开识别到的评审链接。
 - `reviewStream.urlMappings`（对象数组）：可配置的正则->URL 映射列表；当返回文本或消息匹配 `pattern` 时，将自动打开对应的 `url`（若 `autoOpenLink` 为 `true`）。
+- `reviewStream.clearFallbackRoots`（字符串数组）：`Clear` 在 `git clean` 删除失败时允许兜底删除的目录根。建议只保留可再生目录（缓存、构建产物、依赖目录），避免误删业务源码。
 
 ## 使用演示与截图
 
@@ -77,4 +87,5 @@
 ## 参考
 
 更多实现细节请查看源代码： [src/extension.ts](src/extension.ts)
+更多模块化实现可查看： [src/pushForReview.ts](src/pushForReview.ts)、[src/gitClear.ts](src/gitClear.ts)
 
