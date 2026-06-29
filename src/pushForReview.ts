@@ -93,33 +93,46 @@ export function registerPushForReviewCommand(
           return;
         }
 
-        try {
-          const pushResult = await runGitPushAndGetOutput(
-            repository.rootUri.fsPath,
-            currentBranch,
-            selectedRemote,
-          );
-          console.log("[git push output]", pushResult.output);
+        // 使用进度弹窗包装整个推送过程，让用户感知开始、进行中和结束
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: "正在推送评审",
+            cancellable: false,
+          },
+          async (progress) => {
+            progress.report({ message: "正在执行 git push ..." });
 
-          const url = extractFirstUrl(pushResult.output);
-          let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
-          if (url) {
-            message += `\n\n[访问评审链接](${url})`;
-          }
+            try {
+              const pushResult = await runGitPushAndGetOutput(
+                repository.rootUri.fsPath,
+                currentBranch,
+                selectedRemote,
+              );
+              console.log("[git push output]", pushResult.output);
 
-          await showConfirmMessage(message, url);
-        } catch (error) {
-          console.log("[git push error]", error);
+              const url = extractFirstUrl(pushResult.output);
+              let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
+              if (url) {
+                message += `\n\n[访问评审链接](${url})`;
+              }
 
-          const errorOutput = extractErrorOutput(error);
-          const url = extractFirstUrl(errorOutput);
-          let message = `推送失败 (Failed to push the repository): ${String(error)}`;
-          if (url) {
-            message += `\n\n[访问评审链接](${url})`;
-          }
+              // 进度自动结束，再弹结果
+              await showConfirmMessage(message, url);
+            } catch (error) {
+              console.log("[git push error]", error);
 
-          await showConfirmMessage(message, url);
-        }
+              const errorOutput = extractErrorOutput(error);
+              const url = extractFirstUrl(errorOutput);
+              let message = `推送失败 (Failed to push the repository): ${String(error)}`;
+              if (url) {
+                message += `\n\n[访问评审链接](${url})`;
+              }
+
+              await showConfirmMessage(message, url);
+            }
+          },
+        );
       },
     ),
   );
