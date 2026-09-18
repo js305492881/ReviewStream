@@ -1,10 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs/promises";
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const execFileAsync = promisify(execFile);
+import { runGitCommand, type GitCommandResult } from "./gitExecutable";
 
 const DEFAULT_CLEAR_FALLBACK_ROOTS = [
   "node_modules",
@@ -36,14 +33,9 @@ type GitApiLike = {
 };
 
 /**
- * Git 命令执行结果。
+ * Git 命令执行结果（复用统一 git 执行模块的结构）。
  */
-export type GitExecutionResult = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  errorMessage?: string;
-};
+export type GitExecutionResult = GitCommandResult;
 
 type GitStorageSnapshot = {
   gitDir: string;
@@ -748,6 +740,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
 /**
  * 执行 git 子命令，并把 stdout/stderr 统一返回。
+ * 复用统一的 git 解析（优先 `git.path`），避免扩展与内置 Git 使用不同的 git 二进制。
  * @param repoPath 仓库目录
  * @param args git 参数
  * @returns 执行结果
@@ -756,28 +749,7 @@ async function runGitCmd(
   repoPath: string,
   args: string[],
 ): Promise<GitExecutionResult> {
-  try {
-    const { stdout, stderr } = await execFileAsync("git", args, {
-      cwd: repoPath,
-    });
-    return {
-      ok: true,
-      stdout: stdout ?? "",
-      stderr: stderr ?? "",
-    };
-  } catch (error) {
-    const maybeError = error as {
-      message?: string;
-      stdout?: string;
-      stderr?: string;
-    };
-    return {
-      ok: false,
-      stdout: maybeError.stdout ?? "",
-      stderr: maybeError.stderr ?? "",
-      errorMessage: maybeError.message ?? String(error),
-    };
-  }
+  return runGitCommand(repoPath, args);
 }
 
 /**

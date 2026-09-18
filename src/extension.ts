@@ -1,9 +1,13 @@
 import * as vscode from "vscode";
-import { registerPushForReviewCommand } from "./pushForReview";
+import {
+  registerPushForReviewCommand,
+  __test__ as pushForReviewTestHelpers,
+} from "./pushForReview";
 import {
   registerGitClearCommand,
   __test__ as gitClearTestHelpers,
 } from "./gitClear";
+import { __test__ as gitExecutableTestHelpers } from "./gitExecutable";
 
 /**
  * 当扩展被激活时调用
@@ -26,5 +30,7 @@ export function deactivate() {}
  * @returns 可供测试调用的纯函数引用
  */
 export const __test__ = {
+  ...pushForReviewTestHelpers,
   ...gitClearTestHelpers,
+  ...gitExecutableTestHelpers,
 };

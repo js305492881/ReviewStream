@@ -2,6 +2,12 @@ import * as vscode from "vscode";
 import * as os from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import {
+  extractErrorText,
+  extractGitFailureReason,
+  resolveGitExecutablePath,
+  runGitCommand,
+} from "./gitExecutable";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +29,25 @@ type GitRepositoryLike = {
 type GitApiLike = {
   repositories: GitRepositoryLike[];
 };
+
+/**
+ * 远端列表读取结果。
+ * 失败时携带 git 的真实报错原因，避免把“git 执行失败”误报成“仓库没有远端”。
+ */
+type GitRemoteListResult =
+  | { ok: true; remotes: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * 远端解析结果。
+ * - selected：已确定远端（单远端自动选择，或多远端由用户选定）
+ * - cancelled：用户在多远端选择框中主动取消
+ * - failed：无法读取远端（git 执行失败，或仓库确实未配置远端）
+ */
+type PushRemoteResolution =
+  | { status: "selected"; remote: string }
+  | { status: "cancelled" }
+  | { status: "failed"; message: string };
 
 /**
  * 注册 Push for Review 命令。
@@ -85,13 +110,20 @@ export function registerPushForReviewCommand(
           return;
         }
 
-        const selectedRemote = await resolvePushRemoteWithPrompt(
+        const remoteResolution = await resolvePushRemoteWithPrompt(
           repository.rootUri.fsPath,
         );
-        if (!selectedRemote) {
+        if (remoteResolution.status === "failed") {
+          // 读取远端失败（例如 git 不可用）时给出真实原因，不要再提示“未选择远端”
+          await showConfirmMessage(remoteResolution.message);
+          return;
+        }
+        if (remoteResolution.status === "cancelled") {
           vscode.window.showInformationMessage("已取消推送：未选择远端。");
           return;
         }
+
+        const selectedRemote = remoteResolution.remote;
 
         // 使用进度弹窗包装整个推送过程，让用户感知开始、进行中和结束
         await vscode.window.withProgress(
@@ -122,7 +154,7 @@ export function registerPushForReviewCommand(
             } catch (error) {
               console.log("[git push error]", error);
 
-              const errorOutput = extractErrorOutput(error);
+              const errorOutput = extractErrorText(error);
               const url = extractFirstUrl(errorOutput);
               let message = `推送失败 (Failed to push the repository): ${String(error)}`;
               if (url) {
@@ -165,7 +197,12 @@ async function runGitPushAndGetOutput(
   remote: string,
 ): Promise<{ remote: string; output: string }> {
   const args = ["push", "-u", remote, `HEAD:refs/for/${branch}`];
-  const { stdout, stderr } = await execFileAsync("git", args, { cwd });
+  // 使用与内置 Git 扩展一致的 git（优先 git.path），否则可能命中 PATH 中不可用的 git
+  const { stdout, stderr } = await execFileAsync(
+    resolveGitExecutablePath(),
+    args,
+    { cwd },
+  );
   return {
     remote,
     output: `${stdout ?? ""}\n${stderr ?? ""}`.trim(),
@@ -176,24 +213,39 @@ async function runGitPushAndGetOutput(
  * 解析 push 远端并在多远端场景弹出选择。
  * 单远端自动使用，多远端由用户显式选择。
  * @param repoPath 仓库根目录
- * @returns 远端名称；取消时返回 undefined
+ * @returns 远端解析结果（已选远端 / 用户取消 / 读取失败）
  */
 async function resolvePushRemoteWithPrompt(
   repoPath: string,
-): Promise<string | undefined> {
-  const remotes = await listGitRemotes(repoPath);
-  if (remotes.length === 0) {
-    await showConfirmMessage("未找到 Git 远端，请先配置远端后再推送。");
-    return undefined;
+): Promise<PushRemoteResolution> {
+  const gitExecutable = resolveGitExecutablePath();
+  const remoteList = await readGitRemotes(repoPath);
+
+  if (!remoteList.ok) {
+    // git 命令本身执行失败（例如 git 不可用）时不能当成“没有远端”，必须回传真实原因
+    return {
+      status: "failed",
+      message: buildGitRemoteUnavailableMessage(
+        remoteList.reason,
+        gitExecutable,
+      ),
+    };
   }
 
-  if (remotes.length === 1) {
-    return remotes[0];
+  if (remoteList.remotes.length === 0) {
+    return {
+      status: "failed",
+      message: "未找到 Git 远端，请先配置远端后再推送。",
+    };
+  }
+
+  if (remoteList.remotes.length === 1) {
+    return { status: "selected", remote: remoteList.remotes[0] };
   }
 
   const upstreamRemote = await tryGetUpstreamRemote(repoPath);
   const picked = await vscode.window.showQuickPick(
-    remotes.map((remote) => ({
+    remoteList.remotes.map((remote) => ({
       label: remote,
       description:
         remote === upstreamRemote ? "当前分支上游远端" : undefined,
@@ -206,26 +258,64 @@ async function resolvePushRemoteWithPrompt(
     },
   );
 
-  return picked?.label;
+  if (!picked) {
+    return { status: "cancelled" };
+  }
+
+  return { status: "selected", remote: picked.label };
+}
+
+/**
+ * 解析 `git remote` 输出。
+ * @param stdout git remote 的标准输出
+ * @returns 去除空行与首尾空白的远端名列表
+ */
+function parseGitRemoteOutput(stdout: string): string[] {
+  return (stdout ?? "")
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 构造“无法读取远端”的用户提示。
+ * @param reason git 的真实报错（单行）
+ * @param gitExecutable 当前使用的 git 可执行文件
+ * @returns 包含排查建议的提示文本
+ */
+function buildGitRemoteUnavailableMessage(
+  reason: string,
+  gitExecutable: string,
+): string {
+  const lines = [
+    "无法读取 Git 远端：git 命令执行失败。",
+    `当前使用的 git：${gitExecutable}`,
+  ];
+
+  if (reason) {
+    lines.push(`git 报错：${reason}`);
+  }
+
+  lines.push(
+    "请确认该 git 可用（macOS 上未接受 Xcode 许可证会导致 git 不可用），或在 VS Code 设置中将 git.path 指向可用的 git 后重试。",
+  );
+
+  return lines.join("\n");
 }
 
 /**
  * 读取仓库远端列表。
  * @param repoPath 仓库根目录
- * @returns 远端名称列表
+ * @returns ok=true 时返回远端列表；ok=false 时返回 git 的失败原因
  */
-async function listGitRemotes(repoPath: string): Promise<string[]> {
-  try {
-    const { stdout } = await execFileAsync("git", ["remote"], {
-      cwd: repoPath,
-    });
-    return (stdout ?? "")
-      .split(/\r?\n/)
-      .map((item) => item.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
+async function readGitRemotes(repoPath: string): Promise<GitRemoteListResult> {
+  const result = await runGitCommand(repoPath, ["remote"]);
+
+  if (!result.ok) {
+    return { ok: false, reason: extractGitFailureReason(result) };
   }
+
+  return { ok: true, remotes: parseGitRemoteOutput(result.stdout) };
 }
 
 /**
@@ -233,24 +323,28 @@ async function listGitRemotes(repoPath: string): Promise<string[]> {
  * @param repoPath 仓库根目录
  * @returns 上游远端；不存在时返回 undefined
  */
-async function tryGetUpstreamRemote(repoPath: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-      { cwd: repoPath },
-    );
+async function tryGetUpstreamRemote(
+  repoPath: string,
+): Promise<string | undefined> {
+  const result = await runGitCommand(repoPath, [
+    "rev-parse",
+    "--abbrev-ref",
+    "--symbolic-full-name",
+    "@{u}",
+  ]);
 
-    const upstream = (stdout ?? "").trim();
-    const splitIndex = upstream.indexOf("/");
-    if (splitIndex > 0) {
-      const remote = upstream.slice(0, splitIndex).trim();
-      if (remote) {
-        return remote;
-      }
+  // 没有上游分支时 git 会以非 0 退出码结束，这里直接视为没有上游
+  if (!result.ok) {
+    return undefined;
+  }
+
+  const upstream = result.stdout.trim();
+  const splitIndex = upstream.indexOf("/");
+  if (splitIndex > 0) {
+    const remote = upstream.slice(0, splitIndex).trim();
+    if (remote) {
+      return remote;
     }
-  } catch {
-    // 没有上游分支时返回 undefined。
   }
 
   return undefined;
@@ -349,28 +443,6 @@ function stripAnsiCodes(text: string): string {
 }
 
 /**
- * 从未知异常提取可解析输出。
- * @param error 未知异常
- * @returns 文本输出
- */
-function extractErrorOutput(error: unknown): string {
-  if (typeof error === "string") {
-    return error;
-  }
-
-  if (error && typeof error === "object") {
-    const maybeError = error as {
-      message?: string;
-      stdout?: string;
-      stderr?: string;
-    };
-    return `${maybeError.message ?? ""}\n${maybeError.stdout ?? ""}\n${maybeError.stderr ?? ""}`.trim();
-  }
-
-  return "";
-}
-
-/**
  * 在 macOS 上使用 osascript 发送系统通知。
  * @param title 通知标题
  * @param message 通知内容
@@ -393,3 +465,12 @@ async function showMacSystemNotification(
     console.log("[mac notification error]", error);
   }
 }
+
+/**
+ * 提供给测试使用的内部辅助函数集合，避免远端解析与提示文案出现回归。
+ */
+export const __test__ = {
+  parseGitRemoteOutput,
+  buildGitRemoteUnavailableMessage,
+  readGitRemotes,
+};

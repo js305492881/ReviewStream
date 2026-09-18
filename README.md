@@ -9,6 +9,7 @@
 - 自动检测当前分支并将其推送到 `refs/for/<branch>`。
 - 推送远端策略：仅有一个远端时自动推送；存在多个远端时弹出列表供用户选择后再推送。
 - 捕获远端返回信息并尝试识别评审链接；可配置是否在推送后自动打开链接。
+- 执行 git 命令时优先使用 VS Code 设置中的 `git.path`（与内置 Git 扩展保持一致）；若 git 不可用，会直接展示 git 的真实报错与当前使用的 git 路径，而不是笼统地提示“未选择远端”。
 - 在 macOS 上支持系统通知（需要允许 VS Code 的通知权限）。
 
 ## 快速使用
@@ -79,6 +80,19 @@
 
 - 如何添加自定义的正则->URL 映射？
 	- 在 `reviewStream.urlMappings` 中添加对象形如 `{ "pattern": "your-regex", "url": "https://example.com/path" }`。
+
+- 点击推送后提示“无法读取 Git 远端：git 命令执行失败”，应当如何处理？
+	- 说明扩展调用的 git 无法执行，弹窗中会附上 git 的真实报错与当前使用的 git 路径，常见原因：
+		- macOS 上未接受 Xcode 许可证（报错为 `You have not agreed to the Xcode license agreements...`），可在终端执行 `sudo xcodebuild -license accept` 后重试；
+		- 扩展会优先使用 VS Code 设置中的 `git.path`，若该路径不可用请改为可用的 git，例如：
+
+```json
+"git.path": "/Library/Developer/CommandLineTools/usr/bin/git"
+```
+	- 排查时可在 VS Code 输出面板 / 帮助 -> 切换开发人员工具 的控制台中查看 `[git ...]` 日志。
+
+- 提示“未找到 Git 远端，请先配置远端后再推送。”怎么办？
+	- 说明该仓库确实没有配置任何远端，先执行 `git remote add <name> <url>` 添加远端后重试。
 
 ## 想了解如何开发或构建此扩展？
 

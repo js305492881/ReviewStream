@@ -102,7 +102,11 @@ pnpm run watch-tests
 
 ## 代码结构与关键文件
 
-- `src/extension.ts`：扩展主入口，实现 `extension.gitPushForReview` 命令；业务逻辑主要集中在此文件。
+- `src/extension.ts`：扩展主入口，只负责注册命令并汇总测试辅助函数。
+- `src/pushForReview.ts`：Push for Review 流程（远端解析、推送、评审链接提取与弹窗）。
+- `src/gitClear.ts`：Clear 清理流程（体积快照、fetch/reset/clean/gc、兜底删除）。
+- `src/gitExecutable.ts`：统一的 git 执行入口，解析可执行文件（优先 `git.path`，回退 PATH 中的 `git`）并统一返回 stdout/stderr/失败原因。
+	- **新增任何 git 调用请复用此模块**，不要直接 `execFile("git", ...)`，否则会与内置 Git 扩展使用不同的 git 二进制（例如 macOS 上 PATH 中的 `git` 可能是未接受 Xcode 许可证的 xcrun shim），导致命令莫名失败。
 - `package.json`：扩展声明（命令、菜单、配置项等）和构建脚本。
 - `tsconfig.json`：TypeScript 编译选项。
 

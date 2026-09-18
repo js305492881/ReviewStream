@@ -1,3 +1,13 @@
+# 未发布
+
+- **缺陷修复（重要）**：修复 Push for Review 误报“已取消推送：未选择远端”的问题。
+  - 根因：扩展执行 git 时只走 PATH，未使用 VS Code 设置中的 `git.path`。当两者不是同一个 git 二进制时（例如 macOS 上 PATH 中的 `git` 是未接受 Xcode 许可证的 xcrun shim，会以 exit 69 失败），`git remote` 执行失败被 `catch` 吞掉，并被当作“仓库没有远端”，最终提示“未选择远端”，真实报错被完全掩盖。
+  - 现改为优先使用 `git.path`（与 VS Code 内置 Git 扩展保持一致），弹窗中展示 git 的真实报错与当前使用的 git 路径，并区分“用户主动取消选择”与“远端读取失败”两种提示。
+  - `Clear` 流程同样复用统一 git 解析，避免同类问题。
+- **代码结构**：新增 `src/gitExecutable.ts` 作为唯一 git 执行入口（解析可执行文件、统一返回 stdout/stderr/失败原因）。
+- **测试同步**：新增远端解析相关用例，含“git 不可用时不应被当作没有远端”的回归用例。
+- **文档同步**：README 增加 git 不可用时的排查说明；DEVELOPMENT 更新代码结构与“新增 git 调用须复用 `gitExecutable`”的约定。
+
 # 1.5.0 - 2026-06-29
 
 - **新增功能**：Push for Review 过程增加弹窗进度提示（`withProgress`），让用户清晰感知推送开始、进行中和结束阶段。
