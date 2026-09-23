@@ -8,6 +8,7 @@
 - 在每个 Git 仓库的 SCM 页面添加“Clear”按钮，用于回收 Git 空间并清理工作区。
 - 自动检测当前分支并将其推送到 `refs/for/<branch>`。
 - 推送远端策略：仅有一个远端时自动推送；存在多个远端时弹出列表供用户选择后再推送。
+- 推送前会做一次预检：当本次推送注定不会产生新的评审内容（提交已合入目标分支，或 HEAD 与上次成功推送的提交相同）时，先弹窗说明原因并给出建议命令，避免 Gerrit 返回 `no new changes`；弹窗中可点「仍然推送」忽略预检继续推送，也可通过 `reviewStream.precheckBeforePush` 关闭预检。
 - 捕获远端返回信息并尝试识别评审链接；可配置是否在推送后自动打开链接。
 - 执行 git 命令时优先使用 VS Code 设置中的 `git.path`（与内置 Git 扩展保持一致）；若 git 不可用，会直接展示 git 的真实报错与当前使用的 git 路径，而不是笼统地提示“未选择远端”。
 - 在 macOS 上支持系统通知（需要允许 VS Code 的通知权限）。
@@ -55,6 +56,7 @@
 		"url": "https://banma-scm.yunos-inc.com/buildCenter/task/prebuild/add"
 	}
 ],
+"reviewStream.precheckBeforePush": true,
 "reviewStream.clearFallbackRoots": [
 	"node_modules",
 	"dist",
@@ -66,6 +68,7 @@
 
 - `reviewStream.autoOpenLink`（布尔，默认 `true`）：是否在推送后自动打开识别到的评审链接。
 - `reviewStream.urlMappings`（对象数组）：可配置的正则->URL 映射列表；当返回文本或消息匹配 `pattern` 时，将自动打开对应的 `url`（若 `autoOpenLink` 为 `true`）。
+- `reviewStream.precheckBeforePush`（布尔，默认 `true`）：是否在推送前做预检。开启时，若扩展判断本次推送会被 Gerrit 以 `no new changes` 拒收（提交已在目标分支上，或 HEAD 与上次成功推送的提交相同），会先弹窗说明并给出建议命令；关闭后每次点击都直接推送。
 - `reviewStream.clearFallbackRoots`（字符串数组）：`Clear` 在 `git clean` 删除失败时允许兜底删除的目录根。建议只保留可再生目录（缓存、构建产物、依赖目录），避免误删业务源码。
 
 ## 使用演示与截图
@@ -93,6 +96,12 @@
 
 - 提示“未找到 Git 远端，请先配置远端后再推送。”怎么办？
 	- 说明该仓库确实没有配置任何远端，先执行 `git remote add <name> <url>` 添加远端后重试。
+
+- 点击推送被拦下，提示“本次推送不会产生新的评审内容”，怎么办？
+	- 说明 Gerrit 会以 `no new changes` 拒收这次推送，通常是两种原因：
+		- 代码改了但没有提交（push 只上传已提交的 commit）：先执行 `git commit --amend --no-edit` 把改动并入上一次提交，或新建一次提交，再点推送；
+		- 该提交之前已经推送过、或已经合入目标分支：先执行 `git fetch <remote> <branch>`，再基于最新提交创建新提交后重试。
+	- 如果确认要忽略预检直接推送，在弹窗中点「仍然推送」；如果不想再看到预检，把 `reviewStream.precheckBeforePush` 设为 `false`。
 
 ## 想了解如何开发或构建此扩展？
 
