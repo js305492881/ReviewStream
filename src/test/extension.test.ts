@@ -301,4 +301,28 @@ suite("推送前预检", () => {
     await __test__.recordLastPushedSha(state, key, "");
     assert.strictEqual(__test__.readLastPushedSha(state, key), HEAD_SHA);
   });
+
+  test("buildNoNewChangesFailureMessage 命中时给出建议并保留原始输出", () => {
+    const output = [
+      "remote: Processing changes: refs: 1, done",
+      " ! [remote rejected] HEAD -> refs/for/android16_baseos_dev (no new changes)",
+      "error: failed to push some refs to 'ssh://gerrit3.alibaba-inc.com:29418/code/os/apps/urs_android'",
+    ].join("\n");
+
+    const message = __test__.buildNoNewChangesFailureMessage(output);
+
+    assert.notStrictEqual(message, undefined);
+    assert.match(String(message), /no new changes/);
+    assert.match(String(message), /git commit --amend/);
+    assert.match(String(message), /remote rejected/);
+  });
+
+  test("buildNoNewChangesFailureMessage 对其它错误返回 undefined", () => {
+    assert.strictEqual(
+      __test__.buildNoNewChangesFailureMessage(
+        "error: failed to push some refs (permission denied)",
+      ),
+      undefined,
+    );
+  });
 });

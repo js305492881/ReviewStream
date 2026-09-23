@@ -231,6 +231,36 @@ export async function recordLastPushedSha(
   await state.update(key, sha);
 }
 
+/** Gerrit 拒收“无新内容”推送时输出中的标记文本 */
+const NO_NEW_CHANGES_PATTERN = /no new changes/i;
+
+/**
+ * 推送仍然失败时，识别 Gerrit 的 `no new changes` 拒收并生成可操作文案。
+ * 预检可能因缺少推送记录而漏判，这是兜底路径。
+ * @param output git push 的合并输出（stdout + stderr）
+ * @returns 友好文案；不是 no new changes 时返回 undefined（调用方沿用原有展示）
+ */
+export function buildNoNewChangesFailureMessage(
+  output: string,
+): string | undefined {
+  if (!NO_NEW_CHANGES_PATTERN.test(output)) {
+    return undefined;
+  }
+
+  return [
+    "推送被 Gerrit 拒收：没有新的评审内容（no new changes）。",
+    "",
+    "原因：本次推送的提交与 Gerrit 上已有的 patchset 完全相同，或该提交已经合入目标分支。",
+    "",
+    "请先产生新的提交再推送：",
+    "  git commit --amend --no-edit     # 把当前改动并入上一次提交",
+    '  git commit -m "提交信息"          # 或新建一次提交',
+    "",
+    "原始输出：",
+    output,
+  ].join("\n");
+}
+
 /**
  * 提供给测试使用的内部辅助函数集合。
  */
@@ -242,4 +272,5 @@ export const __test__ = {
   resolveLastPushedKey,
   readLastPushedSha,
   recordLastPushedSha,
+  buildNoNewChangesFailureMessage,
 };
