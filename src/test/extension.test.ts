@@ -217,4 +217,44 @@ suite("推送前预检", () => {
       2,
     );
   });
+
+  test("buildPrecheckMessage：already-on-branch 给出同步与新建提交建议", () => {
+    const message = __test__.buildPrecheckMessage(
+      { status: "block", reason: "already-on-branch" },
+      { branch: "android16_baseos_dev", remote: "origin", headSha: HEAD_SHA },
+    );
+
+    assert.match(message, /0123456/);
+    assert.match(message, /android16_baseos_dev/);
+    assert.match(message, /git fetch origin android16_baseos_dev/);
+    assert.match(message, /no new changes/);
+    assert.match(message, /仍然推送/);
+  });
+
+  test("buildPrecheckMessage：uncommitted-changes 给出改动数与 amend 建议", () => {
+    const message = __test__.buildPrecheckMessage(
+      { status: "block", reason: "uncommitted-changes" },
+      {
+        branch: "android16_baseos_dev",
+        remote: "origin",
+        headSha: HEAD_SHA,
+        uncommittedCount: 3,
+      },
+    );
+
+    assert.match(message, /3 处未提交改动/);
+    assert.match(message, /git commit --amend/);
+    assert.match(message, /仍然推送/);
+  });
+
+  test("buildPrecheckMessage：改动数未知时补充未提交排查建议", () => {
+    const message = __test__.buildPrecheckMessage(
+      { status: "block", reason: "no-new-commit" },
+      { branch: "main", remote: "origin", headSha: HEAD_SHA },
+    );
+
+    assert.match(message, /git commit --amend/);
+    assert.match(message, /没有新的改动/);
+    assert.match(message, /仍然推送/);
+  });
 });

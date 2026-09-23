@@ -104,10 +104,91 @@ export function parseUncommittedCount(porcelainOutput: string): number {
 }
 
 /**
+ * 生成提示文案所需的上下文。
+ */
+export type PushPrecheckMessageContext = {
+  /** 目标评审分支（`refs/for/<branch>` 中的 branch） */
+  branch: string;
+  /** 目标远端名 */
+  remote: string;
+  /** 当前 HEAD 的完整 SHA */
+  headSha: string;
+  /** 未提交改动条数；undefined 表示未知 */
+  uncommittedCount?: number;
+};
+
+/**
+ * 生成预检命中时的中文提示文案。
+ * @param verdict 命中结论（仅 block 分支）
+ * @param context 文案上下文
+ * @returns 供 modal 弹窗展示的多行文本
+ */
+export function buildPrecheckMessage(
+  verdict: Extract<PushPrecheckVerdict, { status: "block" }>,
+  context: PushPrecheckMessageContext,
+): string {
+  const sha = shortSha(context.headSha);
+  const title =
+    "本次推送不会产生新的评审内容（Gerrit 将以 no new changes 拒收）。";
+
+  if (verdict.reason === "already-on-branch") {
+    return [
+      title,
+      "",
+      `原因：当前提交 ${sha} 已经包含在远端分支 ${context.branch}（${context.remote}）上，Gerrit 看不到任何新内容。`,
+      "",
+      "建议：",
+      `1. 先同步远端：git fetch ${context.remote} ${context.branch}`,
+      "2. 基于最新提交创建新的提交，或把改动 amend 到尚未合入的提交上，然后重新推送。",
+      "",
+      "如需忽略预检继续推送，请点击「仍然推送」。",
+    ].join("\n");
+  }
+
+  if (verdict.reason === "uncommitted-changes") {
+    const count = context.uncommittedCount ?? 0;
+    return [
+      title,
+      "",
+      `原因：HEAD（${sha}）与上次成功推送的提交相同，且工作区还有 ${count} 处未提交改动——push 只上传已提交的 commit，这些改动不会被带上。`,
+      "",
+      "建议先提交或并入上一次提交，再点推送：",
+      "  git commit --amend --no-edit     # 把改动并入上一次提交（同一笔评审推荐用这个）",
+      '  git commit -m "提交信息"          # 或新建一次提交',
+      "",
+      "如需忽略预检继续推送，请点击「仍然推送」。",
+    ].join("\n");
+  }
+
+  const lines = [
+    title,
+    "",
+    `原因：HEAD（${sha}）与上次成功推送的提交完全相同，没有新的 patchset 可上传。`,
+  ];
+
+  if (context.uncommittedCount === undefined) {
+    lines.push(
+      "",
+      "如果你已经改了代码但还没有提交，请先提交或 amend 后再推送：",
+      "  git commit --amend --no-edit",
+    );
+  }
+
+  lines.push(
+    "",
+    "如果没有新的改动，不需要再次推送。",
+    "如需忽略预检强制重推，请点击「仍然推送」。",
+  );
+
+  return lines.join("\n");
+}
+
+/**
  * 提供给测试使用的内部辅助函数集合。
  */
 export const __test__ = {
   evaluatePushPrecheck,
+  buildPrecheckMessage,
   shortSha,
   parseUncommittedCount,
 };
