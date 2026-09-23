@@ -7,6 +7,10 @@
 - **代码结构**：新增 `src/gitExecutable.ts` 作为唯一 git 执行入口（解析可执行文件、统一返回 stdout/stderr/失败原因）。
 - **测试同步**：新增远端解析相关用例，含“git 不可用时不应被当作没有远端”的回归用例。
 - **文档同步**：README 增加 git 不可用时的排查说明；DEVELOPMENT 更新代码结构与“新增 git 调用须复用 `gitExecutable`”的约定。
+- **新增功能**：推送前预检（Precheck before push）—— 点击 Push for Review 时先判断本次推送是否必然被 Gerrit 以 `no new changes` 拒收（提交已合入目标分支、HEAD 与上次成功推送相同且还有未提交改动、没有新的 patchset）。命中时弹窗说明原因与建议命令，并提供「仍然推送」逃生口，默认按钮为「取消」，避免手滑白推一次。
+- **配置新增**：`reviewStream.precheckBeforePush`（布尔，默认 `true`）—— 设为 `false` 可关闭预检、恢复原有“点击即推送”行为；预检仅是辅助，采集失败或关闭时一律照常推送。
+- **交互优化**：推送仍失败时识别 Gerrit 的 `no new changes` 拒收，给出可操作的修复建议并保留原始输出，避免抛出一句无上下文「推送失败」。
+- **文档同步**：README 增加预检说明、设置示例与忽略预检的排查路径；DEVELOPMENT 补充 `src/pushPrecheck.ts` 的模块职责与“不 import `vscode`”约定。
 
 # 1.5.0 - 2026-06-29
 
