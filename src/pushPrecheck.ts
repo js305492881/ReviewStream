@@ -184,6 +184,54 @@ export function buildPrecheckMessage(
 }
 
 /**
+ * 生成 workspaceState 中“上次成功推送记录”的键。
+ * 用 JSON 序列化而非分隔符拼接，避免仓库路径中出现分隔符时不同仓库互相覆盖。
+ * @param repoPath 仓库根目录
+ * @param remote 远端名
+ * @param branch 分支名
+ * @returns 稳定的状态键
+ */
+export function resolveLastPushedKey(
+  repoPath: string,
+  remote: string,
+  branch: string,
+): string {
+  return `lastPushed:${JSON.stringify([repoPath, remote, branch])}`;
+}
+
+/**
+ * 读取上次成功推送的 SHA。
+ * @param state 状态容器（通常是 context.workspaceState）
+ * @param key resolveLastPushedKey 生成的键
+ * @returns SHA；没有记录或记录值非法时为 undefined
+ */
+export function readLastPushedSha(
+  state: MementoLike,
+  key: string,
+): string | undefined {
+  const value = state.get<unknown>(key);
+  return typeof value === "string" && value ? value : undefined;
+}
+
+/**
+ * 记录本次成功推送的 SHA，供下次预检判断 HEAD 是否还停在同一个提交。
+ * @param state 状态容器（通常是 context.workspaceState）
+ * @param key resolveLastPushedKey 生成的键
+ * @param sha 推送成功时的 HEAD SHA
+ * @returns Promise<void>
+ */
+export async function recordLastPushedSha(
+  state: MementoLike,
+  key: string,
+  sha: string,
+): Promise<void> {
+  if (!sha) {
+    return;
+  }
+  await state.update(key, sha);
+}
+
+/**
  * 提供给测试使用的内部辅助函数集合。
  */
 export const __test__ = {
@@ -191,4 +239,7 @@ export const __test__ = {
   buildPrecheckMessage,
   shortSha,
   parseUncommittedCount,
+  resolveLastPushedKey,
+  readLastPushedSha,
+  recordLastPushedSha,
 };

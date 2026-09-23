@@ -257,4 +257,48 @@ suite("推送前预检", () => {
     assert.match(message, /没有新的改动/);
     assert.match(message, /仍然推送/);
   });
+
+  test("resolveLastPushedKey 对不同仓库/远端/分支互不冲突", () => {
+    const base = __test__.resolveLastPushedKey("/repo", "origin", "main");
+
+    assert.strictEqual(
+      base,
+      __test__.resolveLastPushedKey("/repo", "origin", "main"),
+    );
+    assert.notStrictEqual(
+      base,
+      __test__.resolveLastPushedKey("/repo2", "origin", "main"),
+    );
+    assert.notStrictEqual(
+      base,
+      __test__.resolveLastPushedKey("/repo", "upstream", "main"),
+    );
+    assert.notStrictEqual(
+      base,
+      __test__.resolveLastPushedKey("/repo", "origin", "dev"),
+    );
+  });
+
+  test("推送记录可在状态容器中往返读写", async () => {
+    const store = new Map<string, unknown>();
+    const state = {
+      get<T>(key: string): T | undefined {
+        return store.get(key) as T | undefined;
+      },
+      update(key: string, value: unknown): Thenable<void> {
+        store.set(key, value);
+        return Promise.resolve();
+      },
+    };
+    const key = __test__.resolveLastPushedKey("/repo", "origin", "main");
+
+    assert.strictEqual(__test__.readLastPushedSha(state, key), undefined);
+
+    await __test__.recordLastPushedSha(state, key, HEAD_SHA);
+    assert.strictEqual(__test__.readLastPushedSha(state, key), HEAD_SHA);
+
+    // 空 SHA 不应写入，避免污染记录
+    await __test__.recordLastPushedSha(state, key, "");
+    assert.strictEqual(__test__.readLastPushedSha(state, key), HEAD_SHA);
+  });
 });
