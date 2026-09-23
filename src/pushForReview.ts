@@ -8,8 +8,27 @@ import {
   resolveGitExecutablePath,
   runGitCommand,
 } from "./gitExecutable";
+import {
+  buildNoNewChangesFailureMessage,
+  buildPrecheckMessage,
+  evaluatePushPrecheck,
+  parseUncommittedCount,
+  PushPrecheckFacts,
+  readLastPushedSha,
+  recordLastPushedSha,
+  resolveLastPushedKey,
+} from "./pushPrecheck";
 
 const execFileAsync = promisify(execFile);
+
+/** 远端跟踪分支的 ref 前缀，用于判断 HEAD 是否已在目标分支上 */
+const REMOTE_TRACKING_REF_PREFIX = "refs/remotes";
+
+/** 预检弹窗按钮：默认项为「取消」，避免手滑直接推送 */
+const PRECHECK_CANCEL_BUTTON = "取消";
+
+/** 预检弹窗按钮：忽略预检继续推送的逃生口 */
+const PRECHECK_CONTINUE_BUTTON = "仍然推送";
 
 /**
  * 简化的 Git Repository 类型，仅包含本模块所需字段。
@@ -124,6 +143,24 @@ export function registerPushForReviewCommand(
         }
 
         const selectedRemote = remoteResolution.remote;
+        const repoPath = repository.rootUri.fsPath;
+        // 以“仓库 + 远端 + 分支”为键记录上次成功推送的 HEAD，供预检判断是否还停在同一个提交
+        const lastPushedKey = resolveLastPushedKey(
+          repoPath,
+          selectedRemote,
+          currentBranch,
+        );
+
+        // 预检放在进度弹窗之外：命中时先弹 modal 让用户确认，避免进入“正在推送”后再被打断
+        const shouldContinue = await confirmPushAfterPrecheck(
+          repoPath,
+          selectedRemote,
+          currentBranch,
+          readLastPushedSha(context.workspaceState, lastPushedKey),
+        );
+        if (!shouldContinue) {
+          return;
+        }
 
         // 使用进度弹窗包装整个推送过程，让用户感知开始、进行中和结束
         await vscode.window.withProgress(
@@ -137,11 +174,21 @@ export function registerPushForReviewCommand(
 
             try {
               const pushResult = await runGitPushAndGetOutput(
-                repository.rootUri.fsPath,
+                repoPath,
                 currentBranch,
                 selectedRemote,
               );
               console.log("[git push output]", pushResult.output);
+
+              // 只有推送成功才记录 HEAD：下次预检据此判断是否仍是同一个提交
+              const pushedSha = await readHeadSha(repoPath);
+              if (pushedSha) {
+                await recordLastPushedSha(
+                  context.workspaceState,
+                  lastPushedKey,
+                  pushedSha,
+                );
+              }
 
               const url = extractFirstUrl(pushResult.output);
               let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
@@ -207,6 +254,137 @@ async function runGitPushAndGetOutput(
     remote,
     output: `${stdout ?? ""}\n${stderr ?? ""}`.trim(),
   };
+}
+
+/**
+ * 读取仓库当前 HEAD 的 SHA。
+ * @param repoPath 仓库根目录
+ * @returns 完整 SHA；git 不可用或读取失败时返回 undefined
+ */
+async function readHeadSha(repoPath: string): Promise<string | undefined> {
+  const result = await runGitCommand(repoPath, ["rev-parse", "HEAD"]);
+  if (!result.ok) {
+    return undefined;
+  }
+  const sha = result.stdout.trim();
+  return sha ? sha : undefined;
+}
+
+/**
+ * 采集预检所需事实。
+ *
+ * 任何一步无法完成都返回 undefined，调用方据此跳过预检——
+ * 预检只是辅助，绝不能成为新的失败源。
+ * @param repoPath 仓库根目录
+ * @param remote 目标远端
+ * @param branch 目标评审分支
+ * @param lastPushedSha 上次成功推送的 SHA（无记录时 undefined）
+ * @returns 预检事实；无法采集时返回 undefined
+ */
+async function collectPushPrecheckFacts(
+  repoPath: string,
+  remote: string,
+  branch: string,
+  lastPushedSha: string | undefined,
+): Promise<PushPrecheckFacts | undefined> {
+  const headSha = await readHeadSha(repoPath);
+  if (!headSha) {
+    return undefined;
+  }
+
+  // merge-base --is-ancestor 退出码 0 才代表“已包含”；非 0（不是祖先、ref 不存在、命令报错）
+  // 一律按 false 处理，宁可漏判也不能误拦正常推送
+  const ancestorResult = await runGitCommand(repoPath, [
+    "merge-base",
+    "--is-ancestor",
+    "HEAD",
+    `${REMOTE_TRACKING_REF_PREFIX}/${remote}/${branch}`,
+  ]);
+
+  const facts: PushPrecheckFacts = {
+    headSha,
+    lastPushedSha,
+    headAlreadyOnBranch: ancestorResult.ok,
+  };
+
+  // 只有 HEAD 与上次成功推送相同时才需要 git status（大仓库上该命令有成本），其它分支无需采集
+  if (lastPushedSha && lastPushedSha === headSha) {
+    const statusResult = await runGitCommand(repoPath, [
+      "status",
+      "--porcelain",
+      "--untracked-files=no",
+    ]);
+    if (statusResult.ok) {
+      facts.uncommittedCount = parseUncommittedCount(statusResult.stdout);
+    }
+  }
+
+  return facts;
+}
+
+/**
+ * 读取 `reviewStream.precheckBeforePush` 配置。
+ * @returns 是否启用推送前预检
+ */
+function isPrecheckEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration("reviewStream")
+    .get<boolean>("precheckBeforePush", true);
+}
+
+/**
+ * 推送前预检：命中“必然被 Gerrit 拒收”的情形时弹窗说明并让用户确认。
+ * @param repoPath 仓库根目录
+ * @param remote 目标远端
+ * @param branch 目标评审分支
+ * @param lastPushedSha 上次成功推送的 SHA（无记录时 undefined）
+ * @returns true 表示继续推送，false 表示用户选择中止
+ */
+async function confirmPushAfterPrecheck(
+  repoPath: string,
+  remote: string,
+  branch: string,
+  lastPushedSha: string | undefined,
+): Promise<boolean> {
+  if (!isPrecheckEnabled()) {
+    return true;
+  }
+
+  const facts = await collectPushPrecheckFacts(
+    repoPath,
+    remote,
+    branch,
+    lastPushedSha,
+  );
+  if (!facts) {
+    return true;
+  }
+
+  const verdict = evaluatePushPrecheck(facts);
+  if (verdict.status === "ok") {
+    return true;
+  }
+
+  const picked = await vscode.window.showWarningMessage(
+    buildPrecheckMessage(verdict, {
+      branch,
+      remote,
+      headSha: facts.headSha,
+      uncommittedCount: facts.uncommittedCount,
+    }),
+    { modal: true },
+    PRECHECK_CANCEL_BUTTON,
+    PRECHECK_CONTINUE_BUTTON,
+  );
+
+  if (picked === PRECHECK_CONTINUE_BUTTON) {
+    return true;
+  }
+
+  vscode.window.showInformationMessage(
+    "已取消推送：预检发现本次推送不会产生新的评审内容。",
+  );
+  return false;
 }
 
 /**
