@@ -152,12 +152,21 @@ export function registerPushForReviewCommand(
         );
 
         // 预检放在进度弹窗之外：命中时先弹 modal 让用户确认，避免进入“正在推送”后再被打断
-        const shouldContinue = await confirmPushAfterPrecheck(
-          repoPath,
-          selectedRemote,
-          currentBranch,
-          readLastPushedSha(context.workspaceState, lastPushedKey),
-        );
+        // 规格要求：预检只是辅助手段，绝不能阻断推送。这里显式兜住整段预检逻辑的异常
+        // （git 采集失败、弹窗本身抛错等），把“调用链不会抛”的隐式约定变成结构性保证。
+        let shouldContinue = true;
+        try {
+          shouldContinue = await confirmPushAfterPrecheck(
+            repoPath,
+            selectedRemote,
+            currentBranch,
+            readLastPushedSha(context.workspaceState, lastPushedKey),
+          );
+        } catch (error) {
+          console.log("[push precheck error]", error);
+          // 预检出错一律按“放行”处理，让用户照常推送
+          shouldContinue = true;
+        }
         if (!shouldContinue) {
           return;
         }
@@ -180,14 +189,21 @@ export function registerPushForReviewCommand(
               );
               console.log("[git push output]", pushResult.output);
 
-              // 只有推送成功才记录 HEAD：下次预检据此判断是否仍是同一个提交
-              const pushedSha = await readHeadSha(repoPath);
-              if (pushedSha) {
-                await recordLastPushedSha(
-                  context.workspaceState,
-                  lastPushedKey,
-                  pushedSha,
-                );
+              // 记录 HEAD 属于“推送后的收尾动作”：它失败只影响下次预检的准确度，
+              // 不能冒泡到外层 catch——否则推送明明成功，用户却会看到“推送失败”，
+              // 而本次评审链接（url）也会被静默丢弃。
+              try {
+                // 只有推送成功才记录 HEAD：下次预检据此判断是否仍是同一个提交
+                const pushedSha = await readHeadSha(repoPath);
+                if (pushedSha) {
+                  await recordLastPushedSha(
+                    context.workspaceState,
+                    lastPushedKey,
+                    pushedSha,
+                  );
+                }
+              } catch (error) {
+                console.log("[record lastPushedSha error]", error);
               }
 
               const url = extractFirstUrl(pushResult.output);
@@ -196,8 +212,13 @@ export function registerPushForReviewCommand(
                 message += `\n\n[访问评审链接](${url})`;
               }
 
-              // 进度自动结束，再弹结果
-              await showConfirmMessage(message, url);
+              // 进度自动结束，再弹结果。弹窗只是收尾动作，若它自身抛错也不能把
+              // 已经成功的推送改判为失败（否则用户会看到与事实相反的提示）。
+              try {
+                await showConfirmMessage(message, url);
+              } catch (error) {
+                console.log("[show push result error]", error);
+              }
             } catch (error) {
               console.log("[git push error]", error);
 
