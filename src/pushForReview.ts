@@ -203,7 +203,12 @@ export function registerPushForReviewCommand(
 
               const errorOutput = extractErrorText(error);
               const url = extractFirstUrl(errorOutput);
-              let message = `推送失败 (Failed to push the repository): ${String(error)}`;
+              // 预检漏判时的兜底：把 Gerrit 的 no new changes 翻译成可操作提示
+              const noNewChangesMessage =
+                buildNoNewChangesFailureMessage(errorOutput);
+              let message =
+                noNewChangesMessage ??
+                `推送失败 (Failed to push the repository): ${String(error)}`;
               if (url) {
                 message += `\n\n[访问评审链接](${url})`;
               }
