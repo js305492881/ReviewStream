@@ -129,3 +129,92 @@ suite("Push for Review 远端解析", () => {
     }
   });
 });
+
+suite("推送前预检", () => {
+  const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
+  const OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+
+  test("evaluatePushPrecheck：HEAD 已在目标分支时优先报 already-on-branch", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: HEAD_SHA,
+        headAlreadyOnBranch: true,
+        uncommittedCount: 0,
+      }),
+      { status: "block", reason: "already-on-branch" },
+    );
+  });
+
+  test("evaluatePushPrecheck：SHA 未变且有未提交改动时报 uncommitted-changes", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 3,
+      }),
+      { status: "block", reason: "uncommitted-changes" },
+    );
+  });
+
+  test("evaluatePushPrecheck：SHA 未变且工作区干净时报 no-new-commit", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 0,
+      }),
+      { status: "block", reason: "no-new-commit" },
+    );
+  });
+
+  test("evaluatePushPrecheck：未提交改动数未知时按 no-new-commit 处理", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+      }),
+      { status: "block", reason: "no-new-commit" },
+    );
+  });
+
+  test("evaluatePushPrecheck：有真正的新提交时放行", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: OTHER_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 12,
+      }),
+      { status: "ok" },
+    );
+  });
+
+  test("evaluatePushPrecheck：没有推送记录时放行（宁漏勿误）", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 5,
+      }),
+      { status: "ok" },
+    );
+  });
+
+  test("shortSha 取前 7 位，短 SHA 原样返回", () => {
+    assert.strictEqual(__test__.shortSha(HEAD_SHA), "0123456");
+    assert.strictEqual(__test__.shortSha("abc"), "abc");
+  });
+
+  test("parseUncommittedCount 统计非空行（兼容 CRLF 与空输出）", () => {
+    assert.strictEqual(__test__.parseUncommittedCount(""), 0);
+    assert.strictEqual(__test__.parseUncommittedCount("\n"), 0);
+    assert.strictEqual(
+      __test__.parseUncommittedCount(" M a.ts\r\nM  b.ts\r\n"),
+      2,
+    );
+  });
+});

@@ -8,6 +8,7 @@ import {
   __test__ as gitClearTestHelpers,
 } from "./gitClear";
 import { __test__ as gitExecutableTestHelpers } from "./gitExecutable";
+import { __test__ as pushPrecheckTestHelpers } from "./pushPrecheck";
 
 /**
  * 当扩展被激活时调用
@@ -33,4 +34,5 @@ export const __test__ = {
   ...pushForReviewTestHelpers,
   ...gitClearTestHelpers,
   ...gitExecutableTestHelpers,
+  ...pushPrecheckTestHelpers,
 };
