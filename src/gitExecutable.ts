@@ -42,20 +42,40 @@ export function resolveGitExecutablePath(): string {
 }
 
 /**
+ * git 子命令的可选执行参数。
+ */
+export type GitCommandOptions = {
+  /** 超时时间（毫秒）；超时后按执行失败返回 */
+  timeoutMs?: number;
+  /** 标准输出/错误缓冲上限（字节）；默认 1MB，大输出场景需显式放大，否则会被截断成 ENOSPC 失败 */
+  maxBuffer?: number;
+};
+
+/**
  * 执行 git 子命令，并把 stdout/stderr 与失败原因统一返回（不抛异常）。
  * @param cwd 工作目录（仓库根路径）
  * @param args git 参数列表
+ * @param options 可选的超时与输出缓冲上限
  * @returns 执行结果（失败时 ok 为 false，且带上真实 stderr）
  */
 export async function runGitCommand(
   cwd: string,
   args: string[],
+  options: GitCommandOptions = {},
 ): Promise<GitCommandResult> {
   try {
     const { stdout, stderr } = await execFileAsync(
       resolveGitExecutablePath(),
       args,
-      { cwd },
+      {
+        cwd,
+        ...(options.timeoutMs !== undefined
+          ? { timeout: options.timeoutMs }
+          : {}),
+        ...(options.maxBuffer !== undefined
+          ? { maxBuffer: options.maxBuffer }
+          : {}),
+      },
     );
     return {
       ok: true,

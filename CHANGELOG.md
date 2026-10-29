@@ -1,5 +1,13 @@
 # 未发布
 
+- **缺陷修复**：修复“推送同一个已上传过的提交时，扩展无法提前识别、白等一次 `no new changes`”的问题。
+  - 现象：在 `urs_desktop` 等工程中点 Push for Review，等待数分钟后弹窗报“推送被 Gerrit 拒收：没有新的评审内容（no new changes）”，看似无法推送。
+  - 根因：Gerrit 对**同一个 commit SHA** 不会重复创建评审/patchset；而预检只信任本地记录的“上次成功推送 SHA”，在命令行/其它工具推过、或换个工作区打开后记录为空，预检必然漏判。
+  - 现改为：预检在本地无结论时执行一次 `git ls-remote --refs <remote> "refs/changes/*"`，若远端已存在指向 HEAD 的评审引用，则判定为 `already-uploaded` 并弹窗指出具体评审（如 `change 1468190 的 patchset 2`）与产生新 patchset 的建议命令。
+  - 该查询带 10 秒超时与 64MB 输出上限，任何失败（非 Gerrit 远端、无网络、超限）一律放行，预检仍不会阻断推送。
+  - 兜底加强：推送仍被 `no new changes` 拒收时，把当前 HEAD 记为“已推送”，下次点击可由预检直接拦住。
+- **代码结构**：`runGitCommand` 支持可选的 `timeoutMs` / `maxBuffer`（默认行为不变）。
+
 - **缺陷修复（重要）**：修复 Push for Review 误报“已取消推送：未选择远端”的问题。
   - 根因：扩展执行 git 时只走 PATH，未使用 VS Code 设置中的 `git.path`。当两者不是同一个 git 二进制时（例如 macOS 上 PATH 中的 `git` 是未接受 Xcode 许可证的 xcrun shim，会以 exit 69 失败），`git remote` 执行失败被 `catch` 吞掉，并被当作“仓库没有远端”，最终提示“未选择远端”，真实报错被完全掩盖。
   - 现改为优先使用 `git.path`（与 VS Code 内置 Git 扩展保持一致），弹窗中展示 git 的真实报错与当前使用的 git 路径，并区分“用户主动取消选择”与“远端读取失败”两种提示。

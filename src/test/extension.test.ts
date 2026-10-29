@@ -204,6 +204,83 @@ suite("推送前预检", () => {
     );
   });
 
+  test("evaluatePushPrecheck：HEAD 已作为远端评审的 patchset 时优先报 already-uploaded", () => {
+    // 用户在命令行/其它工具推过的提交不会有 lastPushedSha 记录，
+    // 只能靠远端 change 引用识别——这正是「重复推送同一提交」的真实场景
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 0,
+        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
+      }),
+      { status: "block", reason: "already-uploaded" },
+    );
+  });
+
+  test("evaluatePushPrecheck：远端 change 引用为空时放行", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uploadedChangeRefs: [],
+      }),
+      { status: "ok" },
+    );
+  });
+
+  test("evaluatePushPrecheck：本地推送记录命中时优先报 no-new-commit", () => {
+    assert.deepStrictEqual(
+      __test__.evaluatePushPrecheck({
+        headSha: HEAD_SHA,
+        lastPushedSha: HEAD_SHA,
+        headAlreadyOnBranch: false,
+        uncommittedCount: 0,
+        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
+      }),
+      { status: "block", reason: "no-new-commit" },
+    );
+  });
+
+  test("parseUploadedChangeRefs 只保留指向同一提交的 change 引用", () => {
+    const output = [
+      "73c45c677ec7f2c49b1b9ee32ae5f1b087081ab6\trefs/changes/90/1468190/1",
+      "4171A4C4E91B5B30A408F549A2517D47EC7FD794\trefs/changes/90/1468190/2",
+      "4171a4c4e91b5b30a408f549a2517d47ec7fd794\trefs/heads/main",
+      "",
+    ].join("\n");
+
+    assert.deepStrictEqual(
+      __test__.parseUploadedChangeRefs(output, HEAD_SHA),
+      ["refs/changes/90/1468190/2"],
+    );
+    // 空 SHA / 空输出都不应误判
+    assert.deepStrictEqual(__test__.parseUploadedChangeRefs(output, ""), []);
+    assert.deepStrictEqual(__test__.parseUploadedChangeRefs("", HEAD_SHA), []);
+  });
+
+  test("buildPrecheckMessage：already-uploaded 指出 change 编号与 patchset", () => {
+    const message = __test__.buildPrecheckMessage(
+      { status: "block", reason: "already-uploaded" },
+      {
+        branch: "android16_baseos_dev_261030",
+        remote: "origin",
+        headSha: HEAD_SHA,
+        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
+      },
+    );
+
+    assert.match(message, /no new changes/);
+    assert.match(message, /change 1468190/);
+    assert.match(message, /patchset 2/);
+    assert.match(message, /git commit --amend/);
+    assert.match(message, /仍然推送/);
+    assert.ok(
+      !message.includes(HEAD_SHA),
+      "提示文案应使用 7 位短 SHA，而非完整 SHA",
+    );
+  });
+
   test("shortSha 取前 7 位，短 SHA 原样返回", () => {
     assert.strictEqual(__test__.shortSha(HEAD_SHA), "0123456");
     assert.strictEqual(__test__.shortSha("abc"), "abc");

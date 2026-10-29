@@ -30,6 +30,15 @@ export type PushPrecheckFacts = {
   headAlreadyOnBranch: boolean;
   /** 已跟踪文件的未提交改动条数；undefined 表示未采集或采集失败 */
   uncommittedCount?: number;
+  /**
+   * 远端 `refs/changes/*` 中指向 HEAD 的评审引用（形如 `refs/changes/90/1468190/2`）。
+   * - `undefined`：未采集或采集失败（无网络、非 Gerrit 远端等）
+   * - 空数组：已确认远端没有该提交的评审引用
+   *
+   * 之所以需要它：`lastPushedSha` 只覆盖“本扩展推成功过”的提交；用户在命令行或其它工具推过、
+   * 或换了工作区后记录为空时，预检会漏判。而 Gerrit 对同一个提交 SHA 再次推送必然回 `no new changes`。
+   */
+  uploadedChangeRefs?: string[];
 };
 
 /**
@@ -37,11 +46,13 @@ export type PushPrecheckFacts = {
  * - already-on-branch：提交已在目标远端分支上（含 HEAD 恰为该分支 tip）
  * - uncommitted-changes：HEAD 与上次推送相同，且工作区还有未提交改动
  * - no-new-commit：HEAD 与上次成功推送完全相同，没有新的 patchset
+ * - already-uploaded：HEAD 已经作为远端某个评审的 patchset 存在，Gerrit 不会重复创建
  */
 export type PushPrecheckBlockReason =
   | "already-on-branch"
   | "uncommitted-changes"
-  | "no-new-commit";
+  | "no-new-commit"
+  | "already-uploaded";
 
 /**
  * 预检结论。
@@ -65,8 +76,8 @@ export function shortSha(sha: string): string {
 /**
  * 判定本次推送是否必然被 Gerrit 以 `no new changes` 拒收。
  *
- * 判定顺序与可靠度一致：已合入 > 存在未提交改动 > 没有新提交。
- * 信息不足（无推送记录、无法判断是否已合入）一律返回 ok —— 预检宁可漏判，
+ * 判定顺序与可靠度一致：已合入 > 本地推送记录（可区分“有未提交改动”）> 远端已上传 > 放行。
+ * 信息不足（无推送记录、无法判断是否已合入、远端引用未采集）一律返回 ok —— 预检宁可漏判，
  * 也不能把正常推送拦下来。
  * @param facts 预检事实
  * @returns 预检结论
@@ -87,7 +98,69 @@ export function evaluatePushPrecheck(
     return { status: "block", reason: "no-new-commit" };
   }
 
+  // 远端已存在指向 HEAD 的 change 引用：该提交已作为 patchset 上传过，
+  // 再推同一个提交 Gerrit 只会回 no new changes（本地没有推送记录时也成立）
+  if (facts.uploadedChangeRefs && facts.uploadedChangeRefs.length > 0) {
+    return { status: "block", reason: "already-uploaded" };
+  }
+
   return { status: "ok" };
+}
+
+/** Gerrit change 引用的前缀 */
+export const GERRIT_CHANGE_REF_PREFIX = "refs/changes/";
+
+/** change 引用格式：`refs/changes/<末两位>/<change 号>/<patchset 序号>` */
+const CHANGE_REF_PATTERN = /^refs\/changes\/[0-9a-f]{2}\/(\d+)\/(\d+)$/i;
+
+/**
+ * 从 `git ls-remote` 输出中挑出指向指定提交的 Gerrit change 引用。
+ *
+ * 只认 `refs/changes/*`（远端评审引用），分支/tag 引用交给 already-on-branch 判定处理，
+ * 避免把“提交已在分支上”误报成“已上传评审”。
+ * @param lsRemoteOutput `git ls-remote --refs <remote> "refs/changes/*"` 的标准输出
+ * @param commitSha 目标提交的完整 SHA（比较时不区分大小写）
+ * @returns 命中的 change 引用列表（去重、保持输出顺序）；无命中时返回空数组
+ */
+export function parseUploadedChangeRefs(
+  lsRemoteOutput: string,
+  commitSha: string,
+): string[] {
+  const target = (commitSha ?? "").trim().toLowerCase();
+  if (!target) {
+    return [];
+  }
+
+  const refs: string[] = [];
+  for (const line of (lsRemoteOutput ?? "").split(/\r?\n/)) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (!sha || !ref) {
+      continue;
+    }
+    if (!ref.startsWith(GERRIT_CHANGE_REF_PREFIX)) {
+      continue;
+    }
+    if (sha.toLowerCase() !== target) {
+      continue;
+    }
+    if (!refs.includes(ref)) {
+      refs.push(ref);
+    }
+  }
+  return refs;
+}
+
+/**
+ * 把 change 引用翻译成可读描述，便于用户在弹窗里直接定位评审。
+ * @param ref 形如 `refs/changes/90/1468190/2` 的引用
+ * @returns 形如 `change 1468190 的 patchset 2（refs/changes/90/1468190/2）`；格式不符时原样返回
+ */
+export function describeChangeRef(ref: string): string {
+  const match = CHANGE_REF_PATTERN.exec(ref ?? "");
+  if (!match) {
+    return ref ?? "";
+  }
+  return `change ${match[1]} 的 patchset ${match[2]}（${ref}）`;
 }
 
 /**
@@ -115,6 +188,8 @@ export type PushPrecheckMessageContext = {
   headSha: string;
   /** 未提交改动条数；undefined 表示未知 */
   uncommittedCount?: number;
+  /** 远端指向 HEAD 的 change 引用（already-uploaded 时用于指出具体评审） */
+  uploadedChangeRefs?: string[];
 };
 
 /**
@@ -150,7 +225,7 @@ export function buildPrecheckMessage(
     return [
       title,
       "",
-      `原因：HEAD（${sha}）与上次成功推送的提交相同，且工作区还有 ${count} 处未提交改动——push 只上传已提交的 commit，这些改动不会被带上。`,
+      `原因：HEAD（${sha}）与上次推送过的提交相同，且工作区还有 ${count} 处未提交改动——push 只上传已提交的 commit，这些改动不会被带上。`,
       "",
       "建议先提交或并入上一次提交，再点推送：",
       "  git commit --amend --no-edit     # 把改动并入上一次提交（同一笔评审推荐用这个）",
@@ -160,10 +235,35 @@ export function buildPrecheckMessage(
     ].join("\n");
   }
 
+  if (verdict.reason === "already-uploaded") {
+    const refs = context.uploadedChangeRefs ?? [];
+    const first = refs[0];
+    const detail = first
+      ? refs.length > 1
+        ? `${describeChangeRef(first)} 等 ${refs.length} 个评审引用`
+        : describeChangeRef(first)
+      : "";
+
+    return [
+      title,
+      "",
+      `原因：HEAD（${sha}）已经作为 Gerrit 评审的 patchset 上传过${
+        detail ? `：${detail}` : ""
+      }。Gerrit 不会为同一个提交重复创建评审或 patchset，因此这次推送必然是 no new changes。`,
+      "",
+      "如需产生新的 patchset（例如重新触发门禁 / CT 验证）：",
+      "  git commit --amend --no-edit     # 生成一个新的提交对象（改动不变），再点推送",
+      "如果本次有真实改动，请先提交再推送：",
+      '  git commit -m "提交信息"',
+      "",
+      "如需忽略预检继续推送，请点击「仍然推送」。",
+    ].join("\n");
+  }
+
   const lines = [
     title,
     "",
-    `原因：HEAD（${sha}）与上次成功推送的提交完全相同，没有新的 patchset 可上传。`,
+    `原因：HEAD（${sha}）与上次推送过的提交完全相同，没有新的 patchset 可上传。`,
   ];
 
   if (context.uncommittedCount === undefined) {
@@ -214,10 +314,13 @@ export function readLastPushedSha(
 }
 
 /**
- * 记录本次成功推送的 SHA，供下次预检判断 HEAD 是否还停在同一个提交。
+ * 记录“该提交已经在 Gerrit 上”的 SHA，供下次预检判断 HEAD 是否还停在同一个提交。
+ *
+ * 写入时机有两种：推送成功后；以及推送被 Gerrit 以 `no new changes` 拒收后——
+ * 后者说明该提交已经作为 patchset 存在，语义上同样属于“已推送”。
  * @param state 状态容器（通常是 context.workspaceState）
  * @param key resolveLastPushedKey 生成的键
- * @param sha 推送成功时的 HEAD SHA
+ * @param sha 推送成功（或被判定为已存在）时的 HEAD SHA
  * @returns Promise<void>
  */
 export async function recordLastPushedSha(
@@ -269,6 +372,8 @@ export const __test__ = {
   buildPrecheckMessage,
   shortSha,
   parseUncommittedCount,
+  parseUploadedChangeRefs,
+  describeChangeRef,
   resolveLastPushedKey,
   readLastPushedSha,
   recordLastPushedSha,

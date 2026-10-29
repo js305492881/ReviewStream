@@ -105,9 +105,9 @@ pnpm run watch-tests
 - `src/extension.ts`：扩展主入口，只负责注册命令并汇总测试辅助函数。
 - `src/pushForReview.ts`：Push for Review 流程（远端解析、推送、评审链接提取与弹窗）。
 - `src/gitClear.ts`：Clear 清理流程（体积快照、fetch/reset/clean/gc、兜底删除）。
-- `src/gitExecutable.ts`：统一的 git 执行入口，解析可执行文件（优先 `git.path`，回退 PATH 中的 `git`）并统一返回 stdout/stderr/失败原因。
+- `src/gitExecutable.ts`：统一的 git 执行入口，解析可执行文件（优先 `git.path`，回退 PATH 中的 `git`）并统一返回 stdout/stderr/失败原因；支持可选的 `timeoutMs` / `maxBuffer`（默认沿用 Node 默认值，行为不变）。
 	- **新增任何 git 调用请复用此模块**，不要直接 `execFile("git", ...)`，否则会与内置 Git 扩展使用不同的 git 二进制（例如 macOS 上 PATH 中的 `git` 可能是未接受 Xcode 许可证的 xcrun shim），导致命令莫名失败。
-- `src/pushPrecheck.ts`：推送前预检的纯逻辑模块——判定本次推送是否会被 Gerrit 以 `no new changes` 拒收、生成提示文案、读写“上次成功推送的 SHA”记录。该模块**不 import `vscode`**（状态容器用结构性类型 `MementoLike`），因此不通过 `gitExecutable` 执行 git 命令；预检所需的 git 事实由 `src/pushForReview.ts` 采集后传入。
+- `src/pushPrecheck.ts`：推送前预检的纯逻辑模块——判定本次推送是否会被 Gerrit 以 `no new changes` 拒收（提交已合入目标分支 / 与上次推送相同 / 已作为远端评审的 patchset 存在）、解析 `git ls-remote` 的 `refs/changes/*` 输出、生成提示文案、读写“已推送的 SHA”记录。该模块**不 import `vscode`**（状态容器用结构性类型 `MementoLike`），因此不通过 `gitExecutable` 执行 git 命令；预检所需的 git 事实（含远端 change 引用查询）由 `src/pushForReview.ts` 采集后传入。
 - `package.json`：扩展声明（命令、菜单、配置项等）和构建脚本。
 - `tsconfig.json`：TypeScript 编译选项。
 
