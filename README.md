@@ -4,11 +4,11 @@
 
 ## 主要功能（面向用户）
 
-- 在每个 Git 仓库的 SCM 页面添加“Push for Review”按钮。
-- 在每个 Git 仓库的 SCM 页面添加“Clear”按钮，用于回收 Git 空间并清理工作区。
+- 在每个 Git 仓库的 SCM 页面添加“Push for Review”按钮；当没有可推送的新提交（HEAD 与上次成功推送相同、或提交已合入远端分支）时，按钮会自动置灰。
+- 可选地在每个 Git 仓库的 SCM 页面添加“Clear”按钮（默认不显示，需将 `reviewStream.showClearButton` 设为 `true`），用于回收 Git 空间并清理工作区。
 - 自动检测当前分支并将其推送到 `refs/for/<branch>`。
 - 推送远端策略：仅有一个远端时自动推送；存在多个远端时弹出列表供用户选择后再推送。
-- 推送前会做一次预检：当本次推送注定不会产生新的评审内容（提交已合入目标分支、HEAD 与上次推送过的提交相同，或该提交已经作为 Gerrit 评审的 patchset 上传过——例如在命令行推过、换了工作区后没有本地记录）时，先弹窗说明原因并给出建议命令，避免 Gerrit 返回 `no new changes`；弹窗中可点「仍然推送」忽略预检继续推送，也可通过 `reviewStream.precheckBeforePush` 关闭预检。
+- 推送前会做一次预检：当本次推送注定不会产生新的评审内容（提交已合入目标分支，或 HEAD 与上次成功推送的提交相同）时，先弹窗说明原因并给出建议命令，避免 Gerrit 返回 `no new changes`；弹窗中可点「仍然推送」忽略预检继续推送，也可通过 `reviewStream.precheckBeforePush` 关闭预检。
 - 捕获远端返回信息并尝试识别评审链接；可配置是否在推送后自动打开链接。
 - 执行 git 命令时优先使用 VS Code 设置中的 `git.path`（与内置 Git 扩展保持一致）；若 git 不可用，会直接展示 git 的真实报错与当前使用的 git 路径，而不是笼统地提示“未选择远端”。
 - 在 macOS 上支持系统通知（需要允许 VS Code 的通知权限）。
@@ -19,12 +19,15 @@
 2. 在对应仓库的标题栏点击“Push for Review”按钮。
 3. 推送完成后会弹出结果对话框（成功 / 失败），如果检测到评审链接并且在设置中启用了自动跳转，则会在默认浏览器中打开链接。
 
+> 提示：当仓库没有可推送的新提交时，“Push for Review”按钮会置灰（例如刚推送完、提交已合入远端分支、或没有活动分支）。新增/修改提交后按钮会自动恢复可用。
+
 如需执行仓库清理：
 
-1. 在 SCM 中选择目标仓库（支持多仓库场景，也支持子模块仓库）。
-2. 点击“Clear”按钮并在确认弹窗中选择“继续清理”。
-3. 清理过程会显示进度条（fetch/reset/clean/gc）。
-4. 完成后弹窗会展示清理前后体积对比（`git` 目录、`objects` 目录、工作区）。
+1. 先在设置中将 `reviewStream.showClearButton` 设为 `true`（默认 `false` 不显示 Clear 按钮）。
+2. 在 SCM 中选择目标仓库（支持多仓库场景，也支持子模块仓库）。
+3. 点击“Clear”按钮并在确认弹窗中选择“继续清理”。
+4. 清理过程会显示进度条（fetch/reset/clean/gc）。
+5. 完成后弹窗会展示清理前后体积对比（`git` 目录、`objects` 目录、工作区）。
 
 > 安全提示：`Clear` 会执行 `git reset --hard` 和 `git clean -fdx`，会删除未提交改动和未追踪文件，请先确认重要内容已提交或备份。
 
@@ -57,6 +60,7 @@
 	}
 ],
 "reviewStream.precheckBeforePush": true,
+"reviewStream.showClearButton": false,
 "reviewStream.clearFallbackRoots": [
 	"node_modules",
 	"dist",
@@ -68,7 +72,8 @@
 
 - `reviewStream.autoOpenLink`（布尔，默认 `true`）：是否在推送后自动打开识别到的评审链接。
 - `reviewStream.urlMappings`（对象数组）：可配置的正则->URL 映射列表；当返回文本或消息匹配 `pattern` 时，将自动打开对应的 `url`（若 `autoOpenLink` 为 `true`）。
-- `reviewStream.precheckBeforePush`（布尔，默认 `true`）：是否在推送前做预检。开启时，若扩展判断本次推送会被 Gerrit 以 `no new changes` 拒收（提交已在目标分支上、HEAD 与上次推送过的提交相同，或该提交已作为远端评审的 patchset 存在），会先弹窗说明并给出建议命令；关闭后每次点击都直接推送。预检在需要判断“该提交是否已上传过评审”时会额外执行一次 `git ls-remote <remote> "refs/changes/*"`（通常 1～3 秒），查询失败一律放行。
+- `reviewStream.precheckBeforePush`（布尔，默认 `true`）：是否在推送前做预检。开启时，若扩展判断本次推送会被 Gerrit 以 `no new changes` 拒收（提交已在目标分支上，或 HEAD 与上次成功推送的提交相同），会先弹窗说明并给出建议命令；关闭后每次点击都直接推送。
+- `reviewStream.showClearButton`（布尔，默认 `false`）：是否在 SCM 标题栏显示“Clear”按钮。默认不显示；设为 `true` 后显示该按钮，同时可在命令面板中使用 `extension.gitClear`。
 - `reviewStream.clearFallbackRoots`（字符串数组）：`Clear` 在 `git clean` 删除失败时允许兜底删除的目录根。建议只保留可再生目录（缓存、构建产物、依赖目录），避免误删业务源码。
 
 ## 使用演示与截图
@@ -98,15 +103,27 @@
 	- 说明该仓库确实没有配置任何远端，先执行 `git remote add <name> <url>` 添加远端后重试。
 
 - 点击推送被拦下，提示“本次推送不会产生新的评审内容”，怎么办？
-	- 说明 Gerrit 会以 `no new changes` 拒收这次推送，通常是三种原因：
+	- 说明 Gerrit 会以 `no new changes` 拒收这次推送，通常是两种原因：
 		- 代码改了但没有提交（push 只上传已提交的 commit）：先执行 `git commit --amend --no-edit` 把改动并入上一次提交，或新建一次提交，再点推送；
-		- 该提交之前已经推送过、或已经合入目标分支：先执行 `git fetch <remote> <branch>`，再基于最新提交创建新提交后重试；
-		- 该提交已经作为某个评审的 patchset 存在于远端（弹窗会指出 `change <编号> 的 patchset <序号>`，例如在命令行推过）：Gerrit 不会为同一个提交重复创建评审，需要先产生新的提交对象，例如执行 `git commit --amend --no-edit`（改动不变，用于重新触发门禁 / CT 验证）后再推送。
+		- 该提交之前已经推送过、或已经合入目标分支：先执行 `git fetch <remote> <branch>`，再基于最新提交创建新提交后重试。
 	- 如果确认要忽略预检直接推送，在弹窗中点「仍然推送」；如果不想再看到预检，把 `reviewStream.precheckBeforePush` 设为 `false`。
 
-- 推送结果提示“推送被 Gerrit 拒收：没有新的评审内容（no new changes）”，怎么办？
-	- 这是 Gerrit 的原始回复：本次推送的提交与 Gerrit 上已有的 patchset 完全相同，或该提交已经合入目标分支。扩展会同时把该提交记为“已推送”，下次点击会被预检直接拦住，不必再等一次完整推送。
-	- 处理方式同上：先产生新的提交（或 `git commit --amend --no-edit`）再推送。
+- Push for Review 按钮为什么是灰色的？
+	- 说明当前确实没有可推送的新评审内容，常见原因：
+		- HEAD 与上次成功推送的提交相同（刚推完，或只改了代码但没有提交）；
+		- 当前提交已经合入远端分支（`git fetch` 后更明显）；
+		- 当前处于 detached HEAD 或仓库还没有任何提交。
+	- 新增或修改提交后按钮会自动恢复可用。若刚改了代码但没提交，请先 `git commit --amend --no-edit` 或新建提交。
+	- 仓库未配置远端时按钮不会置灰，点击后会提示先配置远端，方便定位问题。
+
+- 为什么看不到 Clear 按钮？
+	- `Clear` 默认不显示。请在设置中把 `reviewStream.showClearButton` 设为 `true`：
+
+```json
+"reviewStream.showClearButton": true
+```
+
+	- 保存后 SCM 标题栏会出现 Clear 按钮，命令面板中也会出现 `extension.gitClear`。
 
 ## 想了解如何开发或构建此扩展？
 

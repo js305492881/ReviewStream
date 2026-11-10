@@ -3,7 +3,7 @@ import * as assert from "assert";
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from "vscode";
-import { __test__ } from "../../src/extension";
+import { __test__ } from "../extension";
 
 suite("Extension Test Suite", () => {
   vscode.window.showInformationMessage("Start all tests.");
@@ -204,83 +204,6 @@ suite("推送前预检", () => {
     );
   });
 
-  test("evaluatePushPrecheck：HEAD 已作为远端评审的 patchset 时优先报 already-uploaded", () => {
-    // 用户在命令行/其它工具推过的提交不会有 lastPushedSha 记录，
-    // 只能靠远端 change 引用识别——这正是「重复推送同一提交」的真实场景
-    assert.deepStrictEqual(
-      __test__.evaluatePushPrecheck({
-        headSha: HEAD_SHA,
-        headAlreadyOnBranch: false,
-        uncommittedCount: 0,
-        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
-      }),
-      { status: "block", reason: "already-uploaded" },
-    );
-  });
-
-  test("evaluatePushPrecheck：远端 change 引用为空时放行", () => {
-    assert.deepStrictEqual(
-      __test__.evaluatePushPrecheck({
-        headSha: HEAD_SHA,
-        headAlreadyOnBranch: false,
-        uploadedChangeRefs: [],
-      }),
-      { status: "ok" },
-    );
-  });
-
-  test("evaluatePushPrecheck：本地推送记录命中时优先报 no-new-commit", () => {
-    assert.deepStrictEqual(
-      __test__.evaluatePushPrecheck({
-        headSha: HEAD_SHA,
-        lastPushedSha: HEAD_SHA,
-        headAlreadyOnBranch: false,
-        uncommittedCount: 0,
-        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
-      }),
-      { status: "block", reason: "no-new-commit" },
-    );
-  });
-
-  test("parseUploadedChangeRefs 只保留指向同一提交的 change 引用", () => {
-    const output = [
-      "73c45c677ec7f2c49b1b9ee32ae5f1b087081ab6\trefs/changes/90/1468190/1",
-      "4171A4C4E91B5B30A408F549A2517D47EC7FD794\trefs/changes/90/1468190/2",
-      "4171a4c4e91b5b30a408f549a2517d47ec7fd794\trefs/heads/main",
-      "",
-    ].join("\n");
-
-    assert.deepStrictEqual(
-      __test__.parseUploadedChangeRefs(output, HEAD_SHA),
-      ["refs/changes/90/1468190/2"],
-    );
-    // 空 SHA / 空输出都不应误判
-    assert.deepStrictEqual(__test__.parseUploadedChangeRefs(output, ""), []);
-    assert.deepStrictEqual(__test__.parseUploadedChangeRefs("", HEAD_SHA), []);
-  });
-
-  test("buildPrecheckMessage：already-uploaded 指出 change 编号与 patchset", () => {
-    const message = __test__.buildPrecheckMessage(
-      { status: "block", reason: "already-uploaded" },
-      {
-        branch: "android16_baseos_dev_261030",
-        remote: "origin",
-        headSha: HEAD_SHA,
-        uploadedChangeRefs: ["refs/changes/90/1468190/2"],
-      },
-    );
-
-    assert.match(message, /no new changes/);
-    assert.match(message, /change 1468190/);
-    assert.match(message, /patchset 2/);
-    assert.match(message, /git commit --amend/);
-    assert.match(message, /仍然推送/);
-    assert.ok(
-      !message.includes(HEAD_SHA),
-      "提示文案应使用 7 位短 SHA，而非完整 SHA",
-    );
-  });
-
   test("shortSha 取前 7 位，短 SHA 原样返回", () => {
     assert.strictEqual(__test__.shortSha(HEAD_SHA), "0123456");
     assert.strictEqual(__test__.shortSha("abc"), "abc");
@@ -457,5 +380,77 @@ suite("推送前预检", () => {
 
     store.set(key, { sha: HEAD_SHA });
     assert.strictEqual(__test__.readLastPushedSha(state, key), undefined);
+  });
+});
+
+suite("Push for Review 按钮可用状态", () => {
+  const HEAD_SHA = "0123456789abcdef0123456789abcdef01234567";
+  const OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
+
+  test("无活动分支或没有提交时按钮不可用", () => {
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: undefined,
+        headSha: HEAD_SHA,
+        remotes: [],
+      }),
+      false,
+    );
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: "main",
+        headSha: undefined,
+        remotes: [],
+      }),
+      false,
+    );
+  });
+
+  test("未配置远端时保持可用，交由命令给出明确提示", () => {
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: "main",
+        headSha: HEAD_SHA,
+        remotes: [],
+      }),
+      true,
+    );
+  });
+
+  test("HEAD 与上次推送相同或已合入远端分支时按钮不可用", () => {
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: "main",
+        headSha: HEAD_SHA,
+        remotes: [
+          { lastPushedSha: HEAD_SHA, headAlreadyOnRemoteBranch: false },
+        ],
+      }),
+      false,
+    );
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: "main",
+        headSha: HEAD_SHA,
+        remotes: [
+          { lastPushedSha: OTHER_SHA, headAlreadyOnRemoteBranch: true },
+        ],
+      }),
+      false,
+    );
+  });
+
+  test("只要有一个远端还能产生新评审内容，按钮就保持可用", () => {
+    assert.strictEqual(
+      __test__.evaluatePushAvailability({
+        branch: "main",
+        headSha: HEAD_SHA,
+        remotes: [
+          { lastPushedSha: HEAD_SHA, headAlreadyOnRemoteBranch: true },
+          { lastPushedSha: OTHER_SHA, headAlreadyOnRemoteBranch: false },
+        ],
+      }),
+      true,
+    );
   });
 });

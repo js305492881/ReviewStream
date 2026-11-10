@@ -9,6 +9,10 @@ import {
 } from "./gitClear";
 import { __test__ as gitExecutableTestHelpers } from "./gitExecutable";
 import { __test__ as pushPrecheckTestHelpers } from "./pushPrecheck";
+import {
+  registerPushAvailability,
+  __test__ as pushAvailabilityTestHelpers,
+} from "./pushAvailability";
 
 /**
  * 当扩展被激活时调用
@@ -18,6 +22,8 @@ import { __test__ as pushPrecheckTestHelpers } from "./pushPrecheck";
 export function activate(context: vscode.ExtensionContext) {
   registerPushForReviewCommand(context);
   registerGitClearCommand(context);
+  // 维护 Push for Review 按钮的可用状态（context key），需要在启动后尽早同步
+  registerPushAvailability(context);
 }
 
 /**
@@ -35,4 +41,5 @@ export const __test__ = {
   ...gitClearTestHelpers,
   ...gitExecutableTestHelpers,
   ...pushPrecheckTestHelpers,
+  ...pushAvailabilityTestHelpers,
 };

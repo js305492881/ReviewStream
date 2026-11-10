@@ -12,29 +12,18 @@ import {
   buildNoNewChangesFailureMessage,
   buildPrecheckMessage,
   evaluatePushPrecheck,
-  GERRIT_CHANGE_REF_PREFIX,
   parseUncommittedCount,
-  parseUploadedChangeRefs,
   PushPrecheckFacts,
   readLastPushedSha,
   recordLastPushedSha,
   resolveLastPushedKey,
 } from "./pushPrecheck";
+import { requestPushAvailabilityRefresh } from "./pushAvailability";
 
 const execFileAsync = promisify(execFile);
 
 /** 远端跟踪分支的 ref 前缀，用于判断 HEAD 是否已在目标分支上 */
 const REMOTE_TRACKING_REF_PREFIX = "refs/remotes";
-
-/** 查询远端 change 引用的超时时间：预检只是辅助，不能因为网络问题长时间卡住 */
-const CHANGE_REFS_QUERY_TIMEOUT_MS = 10000;
-
-/**
- * 查询远端 change 引用的输出上限。
- * 大仓库的 open change 数量可达上万条（每条约 60 字节），execFile 默认 1MB 会被截断成失败，
- * 那样预检会静默退化成“不检查”，因此显式放大到 64MB。
- */
-const CHANGE_REFS_QUERY_MAX_BUFFER = 64 * 1024 * 1024;
 
 /** 预检弹窗按钮：默认项为「取消」，避免手滑直接推送 */
 const PRECHECK_CANCEL_BUTTON = "取消";
@@ -218,6 +207,9 @@ export function registerPushForReviewCommand(
                 console.log("[record lastPushedSha error]", error);
               }
 
+              // 推送成功后 HEAD 已被记录为“上次推送”，按钮应立刻回到禁用状态
+              requestPushAvailabilityRefresh();
+
               const url = extractFirstUrl(pushResult.output);
               let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
               if (url) {
@@ -239,32 +231,12 @@ export function registerPushForReviewCommand(
               // 预检漏判时的兜底：把 Gerrit 的 no new changes 翻译成可操作提示
               const noNewChangesMessage =
                 buildNoNewChangesFailureMessage(errorOutput);
-
-              // Gerrit 明确回“没有新内容”，说明该提交已经在评审里了：记下来，
-              // 下次点击就能被预检直接拦住（不必再空等一次几分钟的 push）。
-              if (noNewChangesMessage) {
-                try {
-                  const rejectedSha = await readHeadSha(repoPath);
-                  if (rejectedSha) {
-                    await recordLastPushedSha(
-                      context.workspaceState,
-                      lastPushedKey,
-                      rejectedSha,
-                    );
-                  }
-                } catch (recordError) {
-                  console.log("[record lastPushedSha error]", recordError);
-                }
-              }
-
               let message =
                 noNewChangesMessage ??
                 `推送失败 (Failed to push the repository): ${String(error)}`;
               if (url) {
                 message += `\n\n[访问评审链接](${url})`;
               }
-              // 附上扩展版本：用户报“改了还是同样报错”时，一眼就能判断是否加载了新包
-              message += `\n\n扩展版本：${getExtensionVersion()}`;
 
               await showConfirmMessage(message, url);
             }
@@ -285,20 +257,6 @@ function getGitApi(): GitApiLike | undefined {
     return undefined;
   }
   return gitExtension.getAPI(1) as GitApiLike;
-}
-
-/**
- * 读取本扩展的运行版本。
- *
- * 用于失败提示中标注版本：扩展升级后未 Reload Window 时，运行中的仍是旧代码，
- * 用户会看到“改了还是同样报错”的假象，版本号能一眼区分。
- * @returns 版本号；读取不到时返回 "unknown"
- */
-function getExtensionVersion(): string {
-  const packageJSON = vscode.extensions.getExtension(
-    "xiesigitpush3.git-push-review",
-  )?.packageJSON as { version?: string } | undefined;
-  return packageJSON?.version ?? "unknown";
 }
 
 /**
@@ -391,50 +349,7 @@ async function collectPushPrecheckFacts(
     }
   }
 
-  // 本地记录只能覆盖“本扩展推成功过”的提交：命令行/其它工具推过的提交没有记录，
-  // 换个工作区打开后记录也会丢。此时必须问远端，否则重复推送同一提交必然白等一次
-  // `no new changes`（大仓库一次 push 可能要好几分钟）。
-  // 已经有本地结论时跳过该网络调用，避免给每次推送都加几秒延迟。
-  const decidedLocally =
-    facts.headAlreadyOnBranch || lastPushedSha === headSha;
-  if (!decidedLocally) {
-    facts.uploadedChangeRefs = await findUploadedChangeRefs(
-      repoPath,
-      remote,
-      headSha,
-    );
-  }
-
   return facts;
-}
-
-/**
- * 查询远端 `refs/changes/*`，找出指向指定提交的评审引用。
- *
- * 任何失败（非 Gerrit 远端、无网络、超时、输出超限）都返回 undefined，让预检继续放行——
- * 预检宁可漏判，也不能因为网络问题把正常推送拦下来。
- * @param repoPath 仓库根目录
- * @param remote 目标远端
- * @param headSha 当前 HEAD 的完整 SHA
- * @returns 命中的 change 引用列表；查询失败时返回 undefined
- */
-async function findUploadedChangeRefs(
-  repoPath: string,
-  remote: string,
-  headSha: string,
-): Promise<string[] | undefined> {
-  const result = await runGitCommand(
-    repoPath,
-    ["ls-remote", "--refs", remote, `${GERRIT_CHANGE_REF_PREFIX}*`],
-    {
-      timeoutMs: CHANGE_REFS_QUERY_TIMEOUT_MS,
-      maxBuffer: CHANGE_REFS_QUERY_MAX_BUFFER,
-    },
-  );
-  if (!result.ok) {
-    return undefined;
-  }
-  return parseUploadedChangeRefs(result.stdout, headSha);
 }
 
 /**
@@ -486,7 +401,6 @@ async function confirmPushAfterPrecheck(
       remote,
       headSha: facts.headSha,
       uncommittedCount: facts.uncommittedCount,
-      uploadedChangeRefs: facts.uploadedChangeRefs,
     }),
     { modal: true },
     PRECHECK_CANCEL_BUTTON,
