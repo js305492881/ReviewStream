@@ -7,6 +7,7 @@
   - 该查询带 10 秒超时与 64MB 输出上限，任何失败（非 Gerrit 远端、无网络、超限）一律放行，预检仍不会阻断推送。
   - 兜底加强：推送仍被 `no new changes` 拒收时，把当前 HEAD 记为“已推送”，下次点击可由预检直接拦住。
 - **代码结构**：`runGitCommand` 支持可选的 `timeoutMs` / `maxBuffer`（默认行为不变）。
+- **可观测性**：推送失败提示末尾追加“扩展版本：x.y.z”，用于区分“代码已改但窗口未 Reload、仍在跑旧包”的情况；`already-uploaded` 文案补充“amend 后请确认 Change-Id 未变化，否则会变成一笔新评审”。
 
 - **缺陷修复（重要）**：修复 Push for Review 误报“已取消推送：未选择远端”的问题。
   - 根因：扩展执行 git 时只走 PATH，未使用 VS Code 设置中的 `git.path`。当两者不是同一个 git 二进制时（例如 macOS 上 PATH 中的 `git` 是未接受 Xcode 许可证的 xcrun shim，会以 exit 69 失败），`git remote` 执行失败被 `catch` 吞掉，并被当作“仓库没有远端”，最终提示“未选择远端”，真实报错被完全掩盖。

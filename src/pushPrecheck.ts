@@ -253,6 +253,7 @@ export function buildPrecheckMessage(
       "",
       "如需产生新的 patchset（例如重新触发门禁 / CT 验证）：",
       "  git commit --amend --no-edit     # 生成一个新的提交对象（改动不变），再点推送",
+      "注意：amend 后请确认提交信息里的 Change-Id 没有变化，否则会变成一笔新评审。",
       "如果本次有真实改动，请先提交再推送：",
       '  git commit -m "提交信息"',
       "",

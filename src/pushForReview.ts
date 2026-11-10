@@ -263,6 +263,8 @@ export function registerPushForReviewCommand(
               if (url) {
                 message += `\n\n[访问评审链接](${url})`;
               }
+              // 附上扩展版本：用户报“改了还是同样报错”时，一眼就能判断是否加载了新包
+              message += `\n\n扩展版本：${getExtensionVersion()}`;
 
               await showConfirmMessage(message, url);
             }
@@ -283,6 +285,20 @@ function getGitApi(): GitApiLike | undefined {
     return undefined;
   }
   return gitExtension.getAPI(1) as GitApiLike;
+}
+
+/**
+ * 读取本扩展的运行版本。
+ *
+ * 用于失败提示中标注版本：扩展升级后未 Reload Window 时，运行中的仍是旧代码，
+ * 用户会看到“改了还是同样报错”的假象，版本号能一眼区分。
+ * @returns 版本号；读取不到时返回 "unknown"
+ */
+function getExtensionVersion(): string {
+  const packageJSON = vscode.extensions.getExtension(
+    "xiesigitpush3.git-push-review",
+  )?.packageJSON as { version?: string } | undefined;
+  return packageJSON?.version ?? "unknown";
 }
 
 /**
