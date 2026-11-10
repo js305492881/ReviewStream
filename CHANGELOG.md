@@ -1,9 +1,9 @@
 # 未发布
 
-- **交互优化**：Push for Review 按钮支持禁用状态。当仓库没有可推送的新评审内容时（HEAD 与上次成功推送相同、提交已合入远端分支、detached HEAD 或仓库尚无提交），按钮自动置灰；新增/修改提交或切换分支后自动恢复。判定复用了推送前预检的规则，并监听 Git 仓库状态变化实时刷新。
+- **交互优化**：Push for Review 按钮支持禁用状态。当仓库没有可推送的新评审内容时（HEAD 与上次成功推送相同、提交已合入远端分支、detached HEAD 或仓库尚无提交），按钮从低饱和度蓝色图标切换为更淡的灰色专用图标并不可点击（悬停提示“没有可推送的新提交”）；新增/修改提交或切换分支后自动恢复。判定复用了推送前预检的规则，并监听 Git 仓库状态变化实时刷新。
 - **配置新增**：`reviewStream.showClearButton`（布尔，默认 `false`）—— Clear（仓库清理）按钮改为默认不显示，需显式设为 `true` 后在 SCM 标题栏与命令面板中显示。
 - **代码结构**：新增 `src/pushAvailability.ts`，集中维护 `reviewStream.pushForReviewDisabled` context key；`activationEvents` 增加 `onStartupFinished` 以在启动后同步按钮状态。
-- **文档同步**：README 增加按钮置灰原因、Clear 按钮开启方式与设置示例；CHANGELOG 记录本次交互变更。
+- **文档同步**：README 增加按钮禁用原因、Clear 按钮开启方式与设置示例；CHANGELOG 记录本次交互变更。
 - **缺陷修复（重要）**：修复 Push for Review 误报“已取消推送：未选择远端”的问题。
   - 根因：扩展执行 git 时只走 PATH，未使用 VS Code 设置中的 `git.path`。当两者不是同一个 git 二进制时（例如 macOS 上 PATH 中的 `git` 是未接受 Xcode 许可证的 xcrun shim，会以 exit 69 失败），`git remote` 执行失败被 `catch` 吞掉，并被当作“仓库没有远端”，最终提示“未选择远端”，真实报错被完全掩盖。
   - 现改为优先使用 `git.path`（与 VS Code 内置 Git 扩展保持一致），弹窗中展示 git 的真实报错与当前使用的 git 路径，并区分“用户主动取消选择”与“远端读取失败”两种提示。

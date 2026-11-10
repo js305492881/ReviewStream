@@ -16,6 +16,14 @@ import { readLastPushedSha, resolveLastPushedKey } from "./pushPrecheck";
 export const PUSH_DISABLED_CONTEXT_KEY =
   "reviewStream.pushForReviewDisabled";
 
+/**
+ * 禁用态占位命令 ID。
+ *
+ * VS Code 对自定义 SVG 的禁用态只叠加透明度，深色主题下白色图标几乎看不出变化，
+ * 因此禁用时改为显示一个灰色专用图标（该命令自身永远不可用），让状态一眼可辨。
+ */
+const PUSH_DISABLED_COMMAND_ID = "extension.gitPushForReviewDisabled";
+
 /** 合并短时间内多次仓库状态变化，避免频繁执行 git 子命令 */
 const AVAILABILITY_DEBOUNCE_MS = 300;
 
@@ -119,6 +127,15 @@ export function requestPushAvailabilityRefresh(): void {
 export function registerPushAvailability(
   context: vscode.ExtensionContext,
 ): void {
+  // 占位命令在 UI 上始终禁用；保留处理器用于兜底（例如被程序化调用时给出原因）
+  context.subscriptions.push(
+    vscode.commands.registerCommand(PUSH_DISABLED_COMMAND_ID, async () => {
+      await vscode.window.showInformationMessage(
+        "当前没有可推送的新评审内容：请先产生新的提交（或 amend 上一次提交）后再推送。",
+      );
+    }),
+  );
+
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
   let isRecomputing = false;
