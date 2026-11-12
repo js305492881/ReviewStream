@@ -172,79 +172,124 @@ export function registerPushForReviewCommand(
           return;
         }
 
-        // 使用进度弹窗包装整个推送过程，让用户感知开始、进行中和结束
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: "正在推送评审",
-            cancellable: false,
-          },
-          async (progress) => {
-            progress.report({ message: "正在执行 git push ..." });
+        // 推送期间同时展示两处进度：右下角通知（带阶段文案与进度条）和源代码管理视图内的进度条
+        const pushOutcome = await withPushProgress(async (progress) => {
+          progress.report({ message: "正在执行 git push ...", increment: 10 });
 
+          try {
+            const pushResult = await runGitPushAndGetOutput(
+              repoPath,
+              currentBranch,
+              selectedRemote,
+            );
+            console.log("[git push output]", pushResult.output);
+
+            progress.report({ message: "正在记录推送结果 ...", increment: 60 });
+
+            // 记录 HEAD 属于“推送后的收尾动作”：它失败只影响下次预检的准确度，
+            // 不能冒泡到外层 catch——否则推送明明成功，用户却会看到“推送失败”，
+            // 而本次评审链接（url）也会被静默丢弃。
             try {
-              const pushResult = await runGitPushAndGetOutput(
-                repoPath,
-                currentBranch,
-                selectedRemote,
-              );
-              console.log("[git push output]", pushResult.output);
-
-              // 记录 HEAD 属于“推送后的收尾动作”：它失败只影响下次预检的准确度，
-              // 不能冒泡到外层 catch——否则推送明明成功，用户却会看到“推送失败”，
-              // 而本次评审链接（url）也会被静默丢弃。
-              try {
-                // 只有推送成功才记录 HEAD：下次预检据此判断是否仍是同一个提交
-                const pushedSha = await readHeadSha(repoPath);
-                if (pushedSha) {
-                  await recordLastPushedSha(
-                    context.workspaceState,
-                    lastPushedKey,
-                    pushedSha,
-                  );
-                }
-              } catch (error) {
-                console.log("[record lastPushedSha error]", error);
-              }
-
-              // 推送成功后 HEAD 已被记录为“上次推送”，按钮应立刻回到禁用状态
-              requestPushAvailabilityRefresh();
-
-              const url = extractFirstUrl(pushResult.output);
-              let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
-              if (url) {
-                message += `\n\n[访问评审链接](${url})`;
-              }
-
-              // 进度自动结束，再弹结果。弹窗只是收尾动作，若它自身抛错也不能把
-              // 已经成功的推送改判为失败（否则用户会看到与事实相反的提示）。
-              try {
-                await showConfirmMessage(message, url);
-              } catch (error) {
-                console.log("[show push result error]", error);
+              // 只有推送成功才记录 HEAD：下次预检据此判断是否仍是同一个提交
+              const pushedSha = await readHeadSha(repoPath);
+              if (pushedSha) {
+                await recordLastPushedSha(
+                  context.workspaceState,
+                  lastPushedKey,
+                  pushedSha,
+                );
               }
             } catch (error) {
-              console.log("[git push error]", error);
-
-              const errorOutput = extractErrorText(error);
-              const url = extractFirstUrl(errorOutput);
-              // 预检漏判时的兜底：把 Gerrit 的 no new changes 翻译成可操作提示
-              const noNewChangesMessage =
-                buildNoNewChangesFailureMessage(errorOutput);
-              let message =
-                noNewChangesMessage ??
-                `推送失败 (Failed to push the repository): ${String(error)}`;
-              if (url) {
-                message += `\n\n[访问评审链接](${url})`;
-              }
-
-              await showConfirmMessage(message, url);
+              console.log("[record lastPushedSha error]", error);
             }
-          },
-        );
+
+            // 推送成功后 HEAD 已被记录为“上次推送”，按钮应立刻回到禁用状态
+            requestPushAvailabilityRefresh();
+
+            progress.report({ message: "正在解析评审链接 ...", increment: 25 });
+
+            const url = extractFirstUrl(pushResult.output);
+            let message = `仓库 ${repository.rootUri.path} 已推送到评审分支（远端 ${pushResult.remote}）.`;
+            if (url) {
+              message += `\n\n[访问评审链接](${url})`;
+            }
+
+            return { message, url };
+          } catch (error) {
+            console.log("[git push error]", error);
+
+            const errorOutput = extractErrorText(error);
+            const url = extractFirstUrl(errorOutput);
+            // 预检漏判时的兜底：把 Gerrit 的 no new changes 翻译成可操作提示
+            const noNewChangesMessage =
+              buildNoNewChangesFailureMessage(errorOutput);
+            let message =
+              noNewChangesMessage ??
+              `推送失败 (Failed to push the repository): ${String(error)}`;
+            if (url) {
+              message += `\n\n[访问评审链接](${url})`;
+            }
+
+            return { message, url };
+          }
+        });
+
+        // 结果弹窗只是收尾动作：此时进度已结束，若弹窗自身抛错也不能把
+        // 已经成功的推送改判为失败（否则用户会看到与事实相反的提示）。
+        try {
+          await showConfirmMessage(pushOutcome.message, pushOutcome.url);
+        } catch (error) {
+          console.log("[show push result error]", error);
+        }
       },
     ),
   );
+}
+
+/**
+ * 推送期间的两处可视进度。
+ */
+type PushProgressReporter = vscode.Progress<{
+  message?: string;
+  increment?: number;
+}>;
+
+/**
+ * 在推送期间同时展示“通知进度”与“源代码管理视图进度”，结束后一并收起。
+ *
+ * - `ProgressLocation.Notification`：右下角通知，支持阶段文案与离散进度条；
+ * - `ProgressLocation.SourceControl`：SCM 视图图标处的转圈与视图内进度条，
+ *   位置更贴近用户点击的按钮，即使通知被误关也能看到操作仍在进行。
+ * @param task 需要展示进度的推送任务，返回值会原样透传
+ * @returns 任务返回值
+ */
+async function withPushProgress<T>(
+  task: (progress: PushProgressReporter) => Promise<T>,
+): Promise<T> {
+  let finishScmProgress: () => void = () => undefined;
+  const scmProgressDone = new Promise<void>((resolve) => {
+    finishScmProgress = resolve;
+  });
+
+  // SCM 进度不阻塞主流程，只在 finally 中统一结束
+  const scmProgress = vscode.window.withProgress(
+    { location: vscode.ProgressLocation.SourceControl },
+    () => scmProgressDone,
+  );
+
+  try {
+    return await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "正在推送评审",
+        cancellable: false,
+      },
+      task,
+    );
+  } finally {
+    finishScmProgress();
+    await scmProgress;
+  }
 }
 
 /**

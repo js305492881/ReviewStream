@@ -1,6 +1,7 @@
 # 未发布
 
-- **交互优化**：Push for Review 按钮支持禁用状态。当仓库没有可推送的新评审内容时（HEAD 与上次成功推送相同、提交已合入远端分支、detached HEAD 或仓库尚无提交），按钮从低饱和度蓝色图标切换为更淡的灰色专用图标并不可点击（悬停提示“没有可推送的新提交”）；新增/修改提交或切换分支后自动恢复。判定复用了推送前预检的规则，并监听 Git 仓库状态变化实时刷新。
+- **交互优化**：推送进度更明显。推送期间除右下角通知（含阶段文案与离散进度条）外，源代码管理视图的图标会显示转圈、视图内显示进度条（`ProgressLocation.SourceControl`）；结果对话框改为在进度结束后再弹出，避免进度条与结果弹窗重叠。
+- **交互优化**：Push for Review 按钮支持禁用状态，且**按仓库独立计算**。当某个仓库没有可推送的新评审内容时（HEAD 与上次成功推送相同、提交已合入远端分支、detached HEAD 或仓库尚无提交），该仓库的按钮从低饱和度蓝色图标切换为更淡的灰色专用图标并不可点击（悬停提示“没有可推送的新提交”），同一工程中的其它仓库仍保持蓝色可点击；新增/修改提交或切换分支后自动恢复。实现上通过 `reviewStream.pushDisabledRoots` 记录禁用仓库列表，SCM 标题菜单用 `scmProviderRootUri in / not in` 按仓库匹配，避免了此前 context key 是窗口级、导致一个仓库可推送就让全部仓库按钮都可点击的问题。
 - **配置新增**：`reviewStream.showClearButton`（布尔，默认 `false`）—— Clear（仓库清理）按钮改为默认不显示，需显式设为 `true` 后在 SCM 标题栏与命令面板中显示。
 - **代码结构**：新增 `src/pushAvailability.ts`，集中维护 `reviewStream.pushForReviewDisabled` context key；`activationEvents` 增加 `onStartupFinished` 以在启动后同步按钮状态。
 - **文档同步**：README 增加按钮禁用原因、Clear 按钮开启方式与设置示例；CHANGELOG 记录本次交互变更。

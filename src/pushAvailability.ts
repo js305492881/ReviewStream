@@ -7,14 +7,15 @@ import {
 import { readLastPushedSha, resolveLastPushedKey } from "./pushPrecheck";
 
 /**
- * 控制 Push for Review 按钮是否被禁用的 context key。
+ * 存放“当前没有可推送内容”的仓库根 URI 列表的 context key。
  *
- * `contributes.commands` 里的 `enablement` 使用 `!reviewStream.pushForReviewDisabled`：
- * 该键在扩展完成首次判定前不存在，取反后为 true，保证启动阶段按钮默认可用（fail-open），
- * 只有明确判定“没有可推送的新提交”时才置为 true 让按钮置灰。
+ * 值形如 `["file:///repo/a", "file:///repo/b"]`。`package.json` 的 SCM 标题菜单使用
+ * `scmProviderRootUri in / not in` 与该列表比较：SCM 标题菜单会为每个仓库创建独立的
+ * context key 作用域并绑定 `scmProviderRootUri`，因此可以做到“按仓库”显示不同图标，
+ * 而不是窗口级的全局按钮状态。
  */
-export const PUSH_DISABLED_CONTEXT_KEY =
-  "reviewStream.pushForReviewDisabled";
+export const PUSH_DISABLED_ROOTS_CONTEXT_KEY =
+  "reviewStream.pushDisabledRoots";
 
 /**
  * 禁用态占位命令 ID。
@@ -140,7 +141,7 @@ export function registerPushAvailability(
   let disposed = false;
   let isRecomputing = false;
   let pendingRecompute = false;
-  let lastDisabled: boolean | undefined;
+  let lastDisabledRootsJson: string | undefined;
   const repositorySubscriptions = new Map<
     string,
     { repo: GitRepositoryLike; disposable: vscode.Disposable }
@@ -148,21 +149,21 @@ export function registerPushAvailability(
   const apiSubscriptions: vscode.Disposable[] = [];
 
   /**
-   * 仅在禁用状态发生变化时写入 context key，避免无意义地刷新菜单。
-   * @param canPush 是否允许推送
+   * 仅在禁用仓库列表发生变化时写入 context key，避免无意义地刷新所有仓库的标题栏。
+   * @param disabledRoots 没有可推送内容的仓库根 URI 列表
    * @returns Promise<void>
    */
-  async function applyAvailability(canPush: boolean): Promise<void> {
-    const disabled = !canPush;
-    if (disposed || lastDisabled === disabled) {
+  async function applyDisabledRoots(disabledRoots: string[]): Promise<void> {
+    const serialized = JSON.stringify(disabledRoots);
+    if (disposed || lastDisabledRootsJson === serialized) {
       return;
     }
-    lastDisabled = disabled;
+    lastDisabledRootsJson = serialized;
     try {
       await vscode.commands.executeCommand(
         "setContext",
-        PUSH_DISABLED_CONTEXT_KEY,
-        disabled,
+        PUSH_DISABLED_ROOTS_CONTEXT_KEY,
+        disabledRoots,
       );
     } catch (error) {
       console.log("[push availability setContext error]", error);
@@ -262,7 +263,10 @@ export function registerPushAvailability(
   }
 
   /**
-   * 重算所有仓库的可用状态：只要有一个仓库可推送就保持按钮可用。
+   * 重算所有仓库的可用状态，得出“没有可推送内容”的仓库根 URI 列表。
+   *
+   * 该列表写入 `reviewStream.pushDisabledRoots`，由 SCM 标题菜单按仓库逐一比对
+   * `scmProviderRootUri`，从而实现每个仓库独立显示彩色/灰色按钮。
    * @returns Promise<void>
    */
   async function recompute(): Promise<void> {
@@ -278,28 +282,25 @@ export function registerPushAvailability(
     try {
       const gitApi = await resolveGitApi();
       if (!gitApi) {
-        await applyAvailability(true);
+        // 读不到 Git API 时全部按可用处理，避免误锁
+        await applyDisabledRoots([]);
         return;
       }
 
       syncRepositorySubscriptions(gitApi);
-      if (gitApi.repositories.length === 0) {
-        await applyAvailability(true);
-        return;
-      }
 
-      let canPush = false;
+      const disabledRoots: string[] = [];
       for (const repo of gitApi.repositories) {
-        if (await computeRepositoryAvailability(repo)) {
-          canPush = true;
-          break;
+        if (!(await computeRepositoryAvailability(repo))) {
+          // 与 SCM 标题菜单的 `scmProviderRootUri` 保持同一序列化形式，否则无法匹配
+          disabledRoots.push(repo.rootUri.toString());
         }
       }
-      await applyAvailability(canPush);
+      await applyDisabledRoots(disabledRoots);
     } catch (error) {
       console.log("[push availability compute error]", error);
       // 判定过程出错时保持可用，不能因为一次异常把按钮永久锁死
-      await applyAvailability(true);
+      await applyDisabledRoots([]);
     } finally {
       isRecomputing = false;
       if (pendingRecompute && !disposed) {
@@ -360,7 +361,7 @@ export function registerPushAvailability(
     await recompute();
   })().catch((error) => {
     console.log("[push availability init error]", error);
-    void applyAvailability(true);
+    void applyDisabledRoots([]);
   });
 }
 

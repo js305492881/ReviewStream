@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as path from "path";
 
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
@@ -452,5 +454,59 @@ suite("Push for Review 按钮可用状态", () => {
       }),
       true,
     );
+  });
+});
+
+suite("Push for Review 按钮按仓库生效", () => {
+  /**
+   * 读取仓库根的 package.json（编译后测试位于 out/test，故向上一级再一级）。
+   * @returns 解析后的 package.json 对象
+   */
+  function readPackageJson(): {
+    contributes: {
+      commands: Array<{ command: string; enablement?: string }>;
+      menus: Record<
+        string,
+        Array<{ command: string; when?: string; group?: string }>
+      >;
+    };
+  } {
+    const repoRoot = path.resolve(__dirname, "..", "..");
+    return JSON.parse(
+      fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+    );
+  }
+
+  test("SCM 标题按钮使用 scmProviderRootUri in/not in 按仓库区分状态", () => {
+    const items = readPackageJson().contributes.menus["scm/title"];
+
+    const enabledItem = items.find(
+      (item) => item.command === "extension.gitPushForReview",
+    );
+    const disabledItem = items.find(
+      (item) => item.command === "extension.gitPushForReviewDisabled",
+    );
+
+    assert.ok(enabledItem, "应贡献可点击的 Push for Review 按钮");
+    assert.ok(disabledItem, "应贡献禁用态占位按钮");
+    assert.strictEqual(
+      enabledItem?.when,
+      "scmProvider == git && scmProviderRootUri not in reviewStream.pushDisabledRoots",
+    );
+    assert.strictEqual(
+      disabledItem?.when,
+      "scmProvider == git && scmProviderRootUri in reviewStream.pushDisabledRoots",
+    );
+  });
+
+  // 回归：command 级 enablement 是窗口级的，会导致一个仓库可推送就让所有仓库按钮都可点击
+  test("Push for Review 命令不应带全局 enablement", () => {
+    const commands = readPackageJson().contributes.commands;
+    const command = commands.find(
+      (item) => item.command === "extension.gitPushForReview",
+    );
+
+    assert.ok(command, "应贡献 extension.gitPushForReview 命令");
+    assert.strictEqual(command?.enablement, undefined);
   });
 });

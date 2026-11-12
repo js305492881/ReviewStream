@@ -103,13 +103,13 @@ pnpm run watch-tests
 ## 代码结构与关键文件
 
 - `src/extension.ts`：扩展主入口，只负责注册命令并汇总测试辅助函数。
-- `src/pushForReview.ts`：Push for Review 流程（远端解析、推送、评审链接提取与弹窗）。
+- `src/pushForReview.ts`：Push for Review 流程（远端解析、推送、评审链接提取与弹窗）。推送进度由 `withPushProgress` 同时投射到通知与 SCM 视图两处（`ProgressLocation.Notification` + `ProgressLocation.SourceControl`），结束后再弹结果对话框。
 - `src/gitClear.ts`：Clear 清理流程（体积快照、fetch/reset/clean/gc、兜底删除）。
 - `src/gitExecutable.ts`：统一的 git 执行入口，解析可执行文件（优先 `git.path`，回退 PATH 中的 `git`）并统一返回 stdout/stderr/失败原因。
 	- **新增任何 git 调用请复用此模块**，不要直接 `execFile("git", ...)`，否则会与内置 Git 扩展使用不同的 git 二进制（例如 macOS 上 PATH 中的 `git` 可能是未接受 Xcode 许可证的 xcrun shim），导致命令莫名失败。
 - `src/pushPrecheck.ts`：推送前预检的纯逻辑模块——判定本次推送是否会被 Gerrit 以 `no new changes` 拒收、生成提示文案、读写“上次成功推送的 SHA”记录。该模块**不 import `vscode`**（状态容器用结构性类型 `MementoLike`），因此不通过 `gitExecutable` 执行 git 命令；预检所需的 git 事实由 `src/pushForReview.ts` 采集后传入。
 - `src/pushAvailabilityRules.ts`：Push for Review 按钮可用状态的纯判定逻辑（同样**不 import `vscode`**），复用 `pushPrecheck` 的结论判断“是否还有可推送的新评审内容”。
-- `src/pushAvailability.ts`：监听 Git 仓库状态变化并维护 `reviewStream.pushForReviewDisabled` context key，使 SCM 标题栏按钮在没有新提交时自动禁用；`package.json` 中该命令的 `enablement` 使用 `!reviewStream.pushForReviewDisabled`（键未初始化时按钮保持可用，避免启动阶段误锁）。可点击时使用低饱和度蓝色图标；禁用时 SCM 标题栏改显示更淡的灰色图标占位命令 `extension.gitPushForReviewDisabled`（该命令 `enablement` 恒为 `false`，仅用于视觉区分与悬停提示）。推送成功后由 `pushForReview` 主动触发一次刷新。
+- `src/pushAvailability.ts`：监听 Git 仓库状态变化，把“没有可推送内容”的仓库根 URI 列表写入 `reviewStream.pushDisabledRoots` context key。SCM 标题菜单用 `scmProviderRootUri in / not in reviewStream.pushDisabledRoots` 匹配，因为 SCM 会为每个仓库创建独立的 context key 作用域并绑定 `scmProviderRootUri`，所以能做到**按仓库**显示蓝色可点击按钮或淡灰禁用按钮。可点击时使用低饱和度蓝色图标；禁用时改显示更淡的灰色图标占位命令 `extension.gitPushForReviewDisabled`（该命令 `enablement` 恒为 `false`，仅用于视觉区分与悬停提示）。推送成功后由 `pushForReview` 主动触发一次刷新。
 - `package.json`：扩展声明（命令、菜单、配置项等）和构建脚本。`activationEvents` 包含 `onStartupFinished`，用于在启动后同步按钮可用状态；Clear 按钮的显示由 `config.reviewStream.showClearButton` 控制（默认 `false`）。
 - `tsconfig.json`：TypeScript 编译选项。
 
